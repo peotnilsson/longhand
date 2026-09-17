@@ -1,0 +1,167 @@
+:root {
+  --ink: #1a1a18;
+  --muted: #6b6b66;
+  --rule: #e3e1dc;
+  --paper: #ffffff;
+  --panel: #faf9f7;
+  --error: #b3261e;
+  --error-bg: #fdf0ef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--panel);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(320px, 40%) 1fr;
+  height: 100vh;
+}
+
+.pane-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 14px 20px 8px;
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.editor {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 20px 20px;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 2;
+  tab-size: 2;
+}
+
+.output-pane {
+  overflow-y: auto;
+  background: var(--paper);
+}
+
+.sheet {
+  max-width: 720px;
+  padding: 6px 48px 96px;
+}
+
+.heading {
+  font-size: 19px;
+  font-weight: 600;
+  margin: 32px 0 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.heading.h2,
+.heading.h3 {
+  font-size: 16px;
+  border-bottom: 0;
+}
+
+.prose {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 18px 0 2px;
+}
+
+.calc {
+  margin: 2px 0;
+}
+
+.calc .katex-display {
+  margin: 0.35em 0;
+  text-align: left;
+}
+
+.calc .katex {
+  font-size: 1.05em;
+}
+
+.blank {
+  height: 10px;
+}
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--error);
+  background: var(--error-bg);
+  font-size: 13px;
+}
+
+.error code {
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--ink);
+}
+
+.error-message {
+  color: var(--error);
+}
+
+/* A calculation sheet is a document. It has to print properly. */
+@media print {
+  .app {
+    display: block;
+    height: auto;
+  }
+
+  .editor-pane,
+  .no-print {
+    display: none;
+  }
+
+  .output-pane {
+    overflow: visible;
+  }
+
+  .sheet {
+    max-width: none;
+    padding: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 40vh 1fr;
+  }
+
+  .editor-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .sheet {
+    padding: 6px 20px 64px;
+  }
+}
