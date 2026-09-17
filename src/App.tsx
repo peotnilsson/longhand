@@ -223,6 +223,13 @@ export default function App() {
 
   const title = useMemo(() => sheetTitle(active.source), [active.source])
 
+  // The title block already shows the sheet's title, so the heading it came
+  // from would print it a second time. Skip that one line only.
+  const titleLine = useMemo(
+    () => lines.findIndex((line) => line.kind === 'heading' && line.text === title),
+    [lines, title],
+  )
+
   const update = (patch: Partial<Sheet>) =>
     setStore((current) => ({
       ...current,
@@ -418,9 +425,9 @@ export default function App() {
               <dd>{new Date().toLocaleDateString('sv-SE')}</dd>
             </dl>
           </div>
-          {lines.map((line, index) => (
-            <Rendered key={index} line={line} />
-          ))}
+          {lines.map((line, index) =>
+            index === titleLine ? null : <Rendered key={index} line={line} />,
+          )}
         </div>
       </div>
     </div>
