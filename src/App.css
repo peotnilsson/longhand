@@ -1,9 +1,13 @@
 :root {
   --ink: #1a1a18;
   --muted: #6b6b66;
+  --faint: #8a8780;
   --rule: #e3e1dc;
   --paper: #ffffff;
   --panel: #faf9f7;
+  --shade: #f2f0ec;
+  --pass: #1b6e3c;
+  --pass-bg: #eef6f0;
   --error: #b3261e;
   --error-bg: #fdf0ef;
 }
@@ -27,54 +31,259 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: minmax(320px, 40%) 1fr;
+  grid-template-columns: 176px minmax(360px, 38%) 1fr;
   height: 100vh;
 }
 
-.pane-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding: 14px 20px 8px;
+/* ---------------------------------------------------------- sheets sidebar */
+
+.sheets {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--rule);
+  background: var(--shade);
 }
+
+.sheets-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px 12px 14px;
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sheets ul {
+  flex: 1;
+  margin: 0;
+  padding: 0 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.sheet {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.sheet.current {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--paper);
+}
+
+.sheets-foot {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.sheets-foot button,
+.toolbar button,
+.icon {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.sheets-foot button {
+  flex: 1;
+}
+
+.sheets-foot button:disabled {
+  color: #b8b5ae;
+  cursor: default;
+}
+
+.icon {
+  padding: 1px 7px;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+/* ---------------------------------------------------------- editor side */
 
 .editor-pane {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   border-right: 1px solid var(--rule);
   background: var(--panel);
 }
 
-.editor {
-  flex: 1;
-  width: 100%;
-  border: 0;
-  outline: none;
-  resize: none;
-  background: transparent;
-  color: var(--ink);
-  padding: 6px 20px 20px;
-  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
-  font-size: 14px;
-  line-height: 2;
-  tab-size: 2;
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
 }
 
-.output-pane {
-  overflow-y: auto;
+.sheet-name {
+  flex: 1;
+  min-width: 90px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 6px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.sheet-name:hover,
+.sheet-name:focus {
+  border-color: var(--rule);
+  background: var(--paper);
+  outline: none;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.field select {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+}
+
+.meta-editor {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--rule);
   background: var(--paper);
 }
 
-.sheet {
-  max-width: 720px;
-  padding: 6px 48px 96px;
+.meta-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.meta-editor input {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ---------------------------------------------------------- document side */
+
+.output-pane {
+  overflow-y: auto;
+  min-width: 0;
+  background: var(--paper);
+}
+
+.sheet-page {
+  max-width: 760px;
+  padding: 28px 48px 96px;
+}
+
+.title-block {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 10px;
+  margin-bottom: 26px;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+.title-block-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title-block-main strong {
+  font-size: 15px;
+}
+
+.title-block-main span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.title-block dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 10px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.title-block dt {
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.title-block dd {
+  margin: 0;
+  text-align: right;
 }
 
 .heading {
   font-size: 19px;
   font-weight: 600;
-  margin: 32px 0 4px;
+  margin: 30px 0 4px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--rule);
 }
@@ -91,12 +300,35 @@ body {
   margin: 18px 0 2px;
 }
 
+.note {
+  display: inline-block;
+  margin: 10px 0 2px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--shade);
+  border-radius: 999px;
+}
+
+.calc-block {
+  margin: 2px 0;
+}
+
 .calc {
   margin: 2px 0;
 }
 
+.calc.definition .katex {
+  color: var(--muted);
+}
+
 .calc .katex-display {
   margin: 0.35em 0;
+}
+
+/* KaTeX centres display maths from the inner element, and an engineering
+   calculation belongs flush left like the rest of the document. */
+.calc .katex-display > .katex {
   text-align: left;
 }
 
@@ -107,6 +339,146 @@ body {
 .blank {
   height: 10px;
 }
+
+.tolerance {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -4px 0 8px 1.5em;
+  font-size: 12px;
+}
+
+.tolerance .sigma {
+  color: var(--ink);
+}
+
+.tolerance .shares {
+  color: var(--faint);
+}
+
+/* ---------------------------------------------------------- checks */
+
+.check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--pass);
+  background: var(--pass-bg);
+}
+
+.check.fail {
+  border-left-color: var(--error);
+  background: var(--error-bg);
+}
+
+.check .verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.check .badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--pass);
+}
+
+.check.fail .badge {
+  color: var(--error);
+}
+
+.check .margin {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------- tables */
+
+.sheet-table {
+  width: 100%;
+  margin: 16px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.sheet-table th,
+.sheet-table td {
+  padding: 5px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--rule);
+}
+
+.sheet-table th:first-child,
+.sheet-table td:first-child {
+  text-align: left;
+}
+
+.sheet-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1.5px solid var(--ink);
+}
+
+.sheet-table td.pass {
+  color: var(--pass);
+  font-weight: 600;
+}
+
+.sheet-table td.fail {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------- plots */
+
+.plot {
+  margin: 18px 0;
+}
+
+.plot svg {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+}
+
+.plot .grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.plot .axis {
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+
+.plot .series {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.8;
+}
+
+.plot .tick,
+.plot .axis-label {
+  font-size: 10px;
+  fill: var(--faint);
+  font-family: inherit;
+}
+
+.plot figcaption {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------- errors */
 
 .error {
   display: flex;
@@ -128,15 +500,20 @@ body {
   color: var(--error);
 }
 
-/* A calculation sheet is a document. It has to print properly. */
+/* ---------------------------------------------------------- print */
+
+@page {
+  margin: 18mm 16mm;
+}
+
 @media print {
   .app {
     display: block;
     height: auto;
   }
 
-  .editor-pane,
-  .no-print {
+  .sheets,
+  .editor-pane {
     display: none;
   }
 
@@ -144,16 +521,60 @@ body {
     overflow: visible;
   }
 
-  .sheet {
+  .sheet-page {
     max-width: none;
     padding: 0;
   }
+
+  .title-block {
+    margin-bottom: 20px;
+  }
+
+  /* Never split a calculation, a check, a table row or a plot across pages. */
+  .calc-block,
+  .calc,
+  .check,
+  .error,
+  .prose,
+  .plot,
+  .sheet-table tr {
+    break-inside: avoid;
+  }
+
+  .heading {
+    break-inside: avoid;
+    break-after: avoid;
+  }
+
+  .sheet-table thead {
+    display: table-header-group;
+  }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: 40vh 1fr;
+    grid-template-rows: auto 45vh 1fr;
+  }
+
+  .sheets {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    padding-right: 10px;
+  }
+
+  .sheets ul {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    overflow-x: auto;
+  }
+
+  .sheets-foot {
+    border-top: 0;
   }
 
   .editor-pane {
@@ -161,7 +582,7 @@ body {
     border-bottom: 1px solid var(--rule);
   }
 
-  .sheet {
-    padding: 6px 20px 64px;
+  .sheet-page {
+    padding: 16px 20px 64px;
   }
 }

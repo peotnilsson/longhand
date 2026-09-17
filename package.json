@@ -1,5 +1,5 @@
 {
-  "name": "calcsheet",
+  "name": "longhand",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,6 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.5",
+    "@codemirror/view": "^6.43.12",
+    "@uiw/react-codemirror": "^4.25.11",
     "katex": "^0.18.7",
     "mathjs": "^15.2.0",
     "react": "^19.2.8",
