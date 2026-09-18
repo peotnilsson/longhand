@@ -12,9 +12,9 @@ import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/
 import { tags } from '@lezer/highlight'
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
-import { unitNames, type Line } from './engine'
+import { BUILTIN_NAMES, unitNames, type Line } from './engine'
 
-const KEYWORDS = ['table', 'end', 'plot', 'import', 'vs', 'from', 'to']
+const KEYWORDS = ['table', 'end', 'plot', 'import', 'solve', 'for', 'vs', 'from', 'to']
 
 /** A deliberately small tokenizer — this is a calculation sheet, not a language. */
 const sheetLanguage = StreamLanguage.define<{ afterNumber: boolean }>({
@@ -179,6 +179,7 @@ const completion = autocompletion({
         options: [
           ...[...defined].map((label) => ({ label, type: 'variable', boost: 2 })),
           ...KEYWORDS.map((label) => ({ label, type: 'keyword', boost: 1 })),
+          ...BUILTIN_NAMES.map((label) => ({ label, type: 'function', boost: 1 })),
           ...unitNames().map((label) => ({ label, type: 'constant' })),
         ],
       }

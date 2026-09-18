@@ -7,6 +7,7 @@ import {
   moveSheet,
   moveSheetToProject,
   removeSheet,
+  restore,
   type Store,
 } from './store'
 
@@ -173,5 +174,24 @@ describe('sheet order and moves', () => {
     }
     expect(duplicateNames(project)).toEqual(['Loads'])
     expect(duplicateNames({ ...project, sheets: project.sheets.slice(1) })).toEqual([])
+  })
+
+  it('puts a deleted sheet back where it was', () => {
+    const before = build()
+    const projectId = before.projects[0].id
+    const sheet = before.projects[0].sheets[1]
+    const after = removeSheet(before, 's2')
+    const back = restore(after, { kind: 'sheet', projectId, index: 1, sheet })
+    expect(order(back)).toEqual(['One', 'Two', 'Three'])
+    expect(back.activeSheetId).toBe('s2')
+  })
+
+  it('puts a deleted project back with all of its sheets', () => {
+    const before = build()
+    const project = before.projects[1]
+    const after = { ...before, projects: [before.projects[0]] }
+    const back = restore(after, { kind: 'project', index: 1, project })
+    expect(back.projects.map((p) => p.name)).toEqual(['Example project', 'Other'])
+    expect(back.activeProjectId).toBe('p2')
   })
 })

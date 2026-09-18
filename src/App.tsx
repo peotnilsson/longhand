@@ -16,8 +16,10 @@ import {
   newId,
   newProject,
   removeSheet,
+  restore,
   saveStore,
   slug,
+  type Deleted,
   type Project,
   type ProjectMeta,
   type Settings,
@@ -25,6 +27,19 @@ import {
   type Store,
   type Theme,
 } from './store'
+import {
+  chooseExistingFile,
+  chooseNewFile,
+  forgetHandle,
+  permissionState,
+  readFile,
+  recallHandle,
+  rememberHandle,
+  requestPermission,
+  supportsDisk,
+  writeFile,
+  type DiskState,
+} from './disk'
 import './App.css'
 
 function Rendered({ line }: { line: Line }) {
@@ -257,6 +272,10 @@ function HelpPanel({ onExample }: { onExample: () => void }) {
       ['b = 300 mm +- 2 mm', 'A tolerance. Write ± if you prefer. It propagates to everything below.'],
       ['sigma <= f_ck', 'A check. Renders as OK or NOT OK with how much margin is left.'],
       ['A(d) = pi*d^2/4', 'Your own function. Call it like any other: A(20 mm).'],
+      [
+        'b_req = solve sigma = f_ck for b',
+        'The other question: what b would make sigma equal f_ck? It varies b, re-runs the lines that depend on it, and gives you the value. Add "from 100 mm to 900 mm" if it needs a hint about where to look.',
+      ],
       ['# Heading', 'A heading. The first one becomes the sheet title in the title block.'],
       ['// note', 'A line of prose, for the reasoning a reviewer needs.'],
     ],
@@ -267,6 +286,16 @@ function HelpPanel({ onExample }: { onExample: () => void }) {
       ['end', 'Closes the table.'],
       ['plot sigma vs b from 200 mm to 400 mm', 'Sweeps one input and draws the result.'],
       ['import "Loads"', 'Brings in the definitions from another sheet in this project, by name.'],
+      ['table steel', 'Give a table a name and its columns become data: steel.h, steel.A.'],
+      [
+        'interp(250 mm, steel.h, steel.A)',
+        'Reads between two rows of a named table. Outside it is an error, not an extrapolation.',
+      ],
+      [
+        'lookup("IPE300", steel.profile, steel.A)',
+        'Picks the row with that label.',
+      ],
+      ['sum(steel.A)', 'And max, min, mean — a named column is an ordinary list of values.'],
     ],
   ]
 
@@ -319,10 +348,46 @@ function HelpPanel({ onExample }: { onExample: () => void }) {
       <section>
         <h3>Projects and printing</h3>
         <p className="hint">
-          A project is a set of sheets with one title block, printed as one numbered package —
-          Project → Preview whole project, then Print. ↑ ↓ in the sidebar set the order sheets
-          print in. Print on its own prints the sheet you are looking at.
+          A project is a set of sheets with one title block, printed as one package — Project →
+          Preview whole project, then Print. ↑ ↓ in the sidebar set the order sheets print in.
+          Print on its own prints the sheet you are looking at.
         </p>
+        <p className="hint">
+          In the package preview, <strong>Number the pages</strong> chops the document into real
+          A4 pages, each carrying its sheet's title and "Page 3 of 7". That takes a moment and is
+          worth it for something you are handing in; printing without it is faster and identical
+          but for the numbers.
+        </p>
+      </section>
+
+      <section>
+        <h3>Where your work is kept</h3>
+        <p className="hint">
+          In this browser, which means a cleared browser is a lost sheet. Settings → Data can{' '}
+          <strong>keep a copy on disk</strong>: choose a file once and every change is written to
+          it, so the calculations live somewhere you can back up and find again. Chrome and Edge
+          can do this; Safari and Firefox cannot, and there Export backup is the way.
+        </p>
+      </section>
+
+      <section>
+        <h3>Keyboard</h3>
+        <dl className="syntax">
+          {[
+            ['Alt + N', 'New sheet'],
+            ['Alt + [ / ]', 'Previous / next sheet in this project'],
+            ['Alt + P / H / ,', 'Project, Help, Settings'],
+            ['Cmd/Ctrl + S', 'Save this sheet as a file'],
+            ['Escape', 'Close whatever is open'],
+          ].map(([keys, what]) => (
+            <div key={keys}>
+              <dt>
+                <code>{keys}</code>
+              </dt>
+              <dd>{what}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       <section>
@@ -335,6 +400,38 @@ function HelpPanel({ onExample }: { onExample: () => void }) {
     </div>
   )
 }
+
+/**
+ * The page rules Paged.js needs, kept here rather than in App.css because they
+ * are only ever handed to Paged.js: browsers cannot put a counter in an @page
+ * margin box themselves, which is the whole reason this path exists.
+ */
+const PAGE_CSS = `
+@page {
+  size: A4;
+  margin: 16mm 15mm 18mm;
+  @top-left {
+    content: string(sheet-title);
+    font: 400 8.5pt ui-sans-serif, system-ui, sans-serif;
+    color: #6b6b66;
+    padding-bottom: 3mm;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 400 8.5pt ui-sans-serif, system-ui, sans-serif;
+    color: #6b6b66;
+    padding-top: 3mm;
+  }
+}
+
+.sheet-page .title-block-main strong { string-set: sheet-title content(text); }
+.sheet-page { padding: 0; max-width: none; }
+.sheet-page + .sheet-page { break-before: page; }
+
+/* Nothing should be split down the middle of a formula or a verdict. */
+.calc-block, .check, .sheet-table tr, .katex-display { break-inside: avoid; }
+.title-block { break-after: avoid; }
+`
 
 type Panel = 'none' | 'meta' | 'settings' | 'profile' | 'help'
 
@@ -354,6 +451,15 @@ export default function App() {
   const [printingProject, setPrintingProject] = useState(false)
   const [saveFailure, setSaveFailure] = useState<'quota' | 'blocked' | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState<'sheet' | 'project' | null>(null)
+  const [deleted, setDeleted] = useState<Deleted | null>(null)
+  const [disk, setDisk] = useState<{ handle: FileSystemFileHandle | null; state: DiskState }>({
+    handle: null,
+    state: supportsDisk() ? 'off' : 'unsupported',
+  })
+  const [diskSavedAt, setDiskSavedAt] = useState<number | null>(null)
+  const [paged, setPaged] = useState<'off' | 'working' | 'on' | 'failed'>('off')
+  const outputRef = useRef<HTMLDivElement>(null)
+  const pagedRef = useRef<HTMLDivElement>(null)
   const backupInput = useRef<HTMLInputElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -368,6 +474,47 @@ export default function App() {
     const timer = setTimeout(() => setConfirmingDelete(null), 4000)
     return () => clearTimeout(timer)
   }, [confirmingDelete])
+
+  // The offer to undo a deletion stays up long enough to notice and no longer.
+  useEffect(() => {
+    if (!deleted) return
+    const timer = setTimeout(() => setDeleted(null), 12_000)
+    return () => clearTimeout(timer)
+  }, [deleted])
+
+  // A file chosen in an earlier session is still there; the permission may not be.
+  useEffect(() => {
+    if (!supportsDisk()) return
+    let cancelled = false
+    void (async () => {
+      const handle = await recallHandle()
+      if (!handle || cancelled) return
+      const permission = await permissionState(handle)
+      if (cancelled) return
+      setDisk({ handle, state: permission === 'granted' ? 'on' : 'needs-permission' })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  /**
+   * Write to the file a moment after the last keystroke. The file is a copy,
+   * not the source of truth — localStorage already has it — so a failed write
+   * asks to reconnect rather than losing anything.
+   */
+  useEffect(() => {
+    if (disk.state !== 'on' || !disk.handle) return
+    const handle = disk.handle
+    const timer = setTimeout(() => {
+      void (async () => {
+        const written = await writeFile(handle, JSON.stringify(store, null, 2))
+        if (written) setDiskSavedAt(Date.now())
+        else setDisk({ handle, state: 'needs-permission' })
+      })()
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [store, disk])
 
   useEffect(() => {
     const root = document.documentElement
@@ -462,6 +609,12 @@ export default function App() {
       return
     }
     setConfirmingDelete(null)
+    setDeleted({
+      kind: 'sheet',
+      projectId: project.id,
+      index: project.sheets.findIndex((candidate) => candidate.id === sheet.id),
+      sheet,
+    })
     setStore((current) => removeSheet(current, sheet.id))
   }
 
@@ -472,6 +625,11 @@ export default function App() {
       return
     }
     setConfirmingDelete(null)
+    setDeleted({
+      kind: 'project',
+      index: store.projects.findIndex((candidate) => candidate.id === project.id),
+      project,
+    })
     setStore((current) => {
       const remaining = current.projects.filter((candidate) => candidate.id !== project.id)
       return {
@@ -481,6 +639,12 @@ export default function App() {
         activeSheetId: remaining[0].sheets[0].id,
       }
     })
+  }
+
+  const undoDelete = () => {
+    if (!deleted) return
+    setStore((current) => restore(current, deleted))
+    setDeleted(null)
   }
 
   const reorder = (offset: number) => setStore((current) => moveSheet(current, sheet.id, offset))
@@ -507,6 +671,45 @@ export default function App() {
       'application/json',
     )
     setStore(stamped)
+  }
+
+  const keepOnDisk = async () => {
+    const handle = await chooseNewFile(`${slug(project.name)}.longhand.json`)
+    if (!handle) return
+    await rememberHandle(handle)
+    const written = await writeFile(handle, JSON.stringify(store, null, 2))
+    setDisk({ handle, state: written ? 'on' : 'needs-permission' })
+    if (written) {
+      setDiskSavedAt(Date.now())
+      setStore((current) => ({ ...current, lastBackupAt: Date.now() }))
+    }
+  }
+
+  const openFromDisk = async () => {
+    const handle = await chooseExistingFile()
+    if (!handle) return
+    if (!(await requestPermission(handle))) return
+    const text = await readFile(handle)
+    if (text === null) return
+    try {
+      const { migrate } = await import('./store')
+      setStore(migrate(JSON.parse(text)))
+      await rememberHandle(handle)
+      setDisk({ handle, state: 'on' })
+    } catch {
+      /* not one of ours - leave everything as it is */
+    }
+  }
+
+  const reconnectDisk = async () => {
+    if (!disk.handle) return
+    if (await requestPermission(disk.handle)) setDisk({ handle: disk.handle, state: 'on' })
+  }
+
+  const stopDisk = async () => {
+    await forgetHandle()
+    setDisk({ handle: null, state: 'off' })
+    setDiskSavedAt(null)
   }
 
   const importAll = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -576,6 +779,105 @@ export default function App() {
     setPanel('none')
   }
 
+  /**
+   * Chop the document into real pages so each one can say "Page 3 of 7".
+   *
+   * A browser will not put a counter in an @page margin box, so the only honest
+   * way to number pages is to paginate them ourselves. Paged.js does the
+   * chopping, against a copy of the already-rendered document — it rewrites
+   * what it is given, which is why it gets a copy and not the live React tree.
+   */
+  const paginate = async () => {
+    const pages = outputRef.current?.querySelectorAll('.sheet-page')
+    if (!pages || pages.length === 0) return
+    setPaged('working')
+    try {
+      const { Previewer } = await import('pagedjs')
+      const target = pagedRef.current!
+      target.innerHTML = ''
+      const url = URL.createObjectURL(new Blob([PAGE_CSS], { type: 'text/css' }))
+      try {
+        await new Previewer().preview(
+          [...pages].map((page) => page.outerHTML).join(''),
+          [url],
+          target,
+        )
+        setPaged('on')
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch {
+      setPaged('failed')
+    }
+  }
+
+  const unpaginate = () => {
+    if (pagedRef.current) pagedRef.current.innerHTML = ''
+    setPaged('off')
+  }
+
+  /**
+   * Shortcuts on Alt, which CodeMirror and the browser both mostly leave alone
+   * — and Escape, which is the one everybody tries first. Nothing here is
+   * required: every one of them is a button somewhere.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (printingProject) setPrintingProject(false)
+        else if (panel !== 'none') setPanel('none')
+        else return
+        event.preventDefault()
+        return
+      }
+
+      const save = (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's'
+      if (save) {
+        event.preventDefault()
+        download(sheet.source, `${slug(sheet.name)}.calc`, 'text/plain')
+        return
+      }
+
+      if (!event.altKey || event.metaKey || event.ctrlKey) return
+
+      const step = (offset: number) => {
+        const sheets = project.sheets
+        const at = sheets.findIndex((candidate) => candidate.id === sheet.id)
+        const next = sheets[(at + offset + sheets.length) % sheets.length]
+        setStore((current) => ({ ...current, activeSheetId: next.id }))
+      }
+      const toggle = (which: Panel) =>
+        setPanel((current) => (current === which ? 'none' : which))
+
+      switch (event.key.toLowerCase()) {
+        case 'n':
+          addSheet()
+          break
+        case ']':
+          step(1)
+          break
+        case '[':
+          step(-1)
+          break
+        case 'p':
+          toggle('meta')
+          break
+        case 'h':
+          toggle('help')
+          break
+        case ',':
+          toggle('settings')
+          break
+        default:
+          return
+      }
+      event.preventDefault()
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [panel, printingProject, project, sheet, addSheet])
+
   const duplicates = duplicateNames(project)
   const backupAge = backupAgeDays(store)
 
@@ -588,6 +890,21 @@ export default function App() {
             ? 'This browser has run out of storage for Longhand. Export a backup now, then delete a project you no longer need.'
             : 'This browser is blocking storage, so nothing you type is being kept. Export a backup before you close the tab.'}
           <button onClick={exportAll}>Export backup</button>
+        </div>
+      )}
+
+      {deleted && (
+        <div className="undo-bar no-print">
+          <span>
+            Deleted {deleted.kind === 'project' ? 'project ' : ''}
+            <strong>{deleted.kind === 'project' ? deleted.project.name : deleted.sheet.name}</strong>
+            {deleted.kind === 'project' &&
+              ` and its ${deleted.project.sheets.length} sheet${
+                deleted.project.sheets.length === 1 ? '' : 's'
+              }`}
+            .
+          </span>
+          <button onClick={undoDelete}>Undo</button>
         </div>
       )}
 
@@ -862,18 +1179,51 @@ export default function App() {
 
             <section>
               <h3>Data</h3>
-              <p className="hint">
-                Everything is stored in this browser only.{' '}
-                {backupAge === null
-                  ? 'No backup has ever been exported.'
-                  : backupAge === 0
-                    ? 'Last backup: today.'
-                    : `Last backup: ${backupAge} day${backupAge === 1 ? '' : 's'} ago.`}
-              </p>
+              {disk.state === 'on' ? (
+                <p className="hint">
+                  Saving to <strong>{disk.handle?.name}</strong> as you type
+                  {diskSavedAt ? `, last written ${new Date(diskSavedAt).toLocaleTimeString()}` : ''}.
+                  This browser keeps a copy too.
+                </p>
+              ) : (
+                <p className="hint">
+                  Everything is stored in this browser only.{' '}
+                  {backupAge === null
+                    ? 'No backup has ever been exported.'
+                    : backupAge === 0
+                      ? 'Last backup: today.'
+                      : `Last backup: ${backupAge} day${backupAge === 1 ? '' : 's'} ago.`}
+                </p>
+              )}
+
+              {disk.state === 'needs-permission' && (
+                <p className="warning">
+                  {disk.handle?.name} is no longer writable — the browser needs you to allow it
+                  again.
+                </p>
+              )}
+
               <div className="settings-buttons">
+                {disk.state === 'off' && (
+                  <>
+                    <button onClick={keepOnDisk}>Keep a copy on disk…</button>
+                    <button onClick={openFromDisk}>Open a file from disk…</button>
+                  </>
+                )}
+                {disk.state === 'needs-permission' && (
+                  <button onClick={reconnectDisk}>Reconnect {disk.handle?.name}</button>
+                )}
+                {disk.state === 'on' && <button onClick={stopDisk}>Stop saving to the file</button>}
                 <button onClick={exportAll}>Export backup</button>
                 <button onClick={() => backupInput.current?.click()}>Restore backup</button>
               </div>
+
+              {disk.state === 'unsupported' && (
+                <p className="hint">
+                  This browser cannot write to a file you choose, so a backup is the only copy
+                  outside it. Chrome and Edge can.
+                </p>
+              )}
             </section>
 
             <input
@@ -929,21 +1279,53 @@ export default function App() {
 
       <div
         className={
-          (printingProject ? 'output-pane package' : 'output-pane') + (stale ? ' stale' : '')
+          [
+            printingProject ? 'output-pane package' : 'output-pane',
+            stale ? 'stale' : '',
+            paged === 'on' ? 'paginated' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
         }
+        ref={outputRef}
       >
         {printingProject && (
           <div className="package-bar no-print">
             <span>
-              Package preview — {project.name}, {project.sheets.length} sheet
-              {project.sheets.length === 1 ? '' : 's'}
+              {paged === 'on'
+                ? `${pagedRef.current?.querySelectorAll('.pagedjs_page').length ?? 0} pages — ${project.name}`
+                : `Package preview — ${project.name}, ${project.sheets.length} sheet${
+                    project.sheets.length === 1 ? '' : 's'
+                  }`}
+              {paged === 'failed' && ' — could not paginate; printing works without page numbers'}
             </span>
             <div className="package-bar-actions">
-              <button onClick={() => window.print()}>Print package</button>
-              <button onClick={() => setPrintingProject(false)}>Close</button>
+              {paged === 'off' || paged === 'failed' ? (
+                <button onClick={paginate}>Number the pages</button>
+              ) : (
+                <button onClick={unpaginate} disabled={paged === 'working'}>
+                  {paged === 'working' ? 'Paginating…' : 'Back to one long page'}
+                </button>
+              )}
+              <button onClick={() => window.print()} disabled={paged === 'working'}>
+                Print package
+              </button>
+              <button
+                onClick={() => {
+                  unpaginate()
+                  setPrintingProject(false)
+                }}
+              >
+                Close
+              </button>
             </div>
           </div>
         )}
+
+        {/* Paged.js renders here; the unpaginated document below is hidden while
+            it does, so what is on screen is what will print. */}
+        <div className="paged-output" ref={pagedRef} />
+
         {printingProject ? (
           project.sheets.map((candidate, index) => (
             <SheetDocument

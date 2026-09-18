@@ -10,3 +10,4 @@ export {
   type PlotData,
 } from './sheet'
 export { unitNames } from './units'
+export { BUILTIN_NAMES } from './builtins'

@@ -108,8 +108,45 @@
   border-bottom: 1px solid var(--error);
 }
 
-.save-alert strong {
+.save-alert strong,
+.undo-bar strong {
   font-weight: 600;
+}
+
+/* The offer to undo a deletion. Quiet, not an alarm: nothing has gone wrong. */
+.undo-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 10px 8px 14px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+.undo-bar button {
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  color: var(--ink);
+  background: var(--shade);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.undo-bar button:hover {
+  border-color: var(--rule-strong);
 }
 
 .save-alert button {
@@ -464,6 +501,31 @@ body {
   margin: 0;
   font-size: 11px;
   color: var(--faint);
+}
+
+/* --------------------------------------------------------- paginated print */
+
+/* While Paged.js output is showing it *is* the document: the long version is
+   still in the DOM (it is what gets paginated) but out of the way. */
+.paged-output:empty {
+  display: none;
+}
+
+.output-pane.paginated > .sheet-page {
+  display: none;
+}
+
+.paged-output .pagedjs_page {
+  margin: 0 auto 14px;
+  background: var(--paper);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+}
+
+@media print {
+  .paged-output .pagedjs_page {
+    margin: 0;
+    box-shadow: none;
+  }
 }
 
 /* ------------------------------------------------------------- help panel */

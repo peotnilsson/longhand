@@ -89,6 +89,20 @@ table
   C       | 200 mm | 350 mm
 end
 
+// The other question: what width would just about do?
+b_req = solve sigma = f_ck for b
+
+// A named table becomes data you can read between the rows of
+table steel
+  profile | h      | A
+  IPE200  | 200 mm | 2850 mm^2
+  IPE300  | 300 mm | 5380 mm^2
+  IPE400  | 400 mm | 8450 mm^2
+end
+
+A_250 = interp(250 mm, steel.h, steel.A)
+A_300 = lookup("IPE300", steel.profile, steel.A)
+
 // And a sweep shows sensitivity
 plot sigma vs b from 200 mm to 400 mm
 `
@@ -320,6 +334,35 @@ export function moveSheet(store: Store, sheetId: string, offset: number): Store 
   const [moved] = sheets.splice(from, 1)
   sheets.splice(to, 0, moved)
   return replaceProject(store, { ...project, sheets })
+}
+
+/** What a deletion took away, kept so it can be put back. */
+export type Deleted =
+  | { kind: 'sheet'; projectId: string; index: number; sheet: Sheet }
+  | { kind: 'project'; index: number; project: Project }
+
+/** Put back exactly what was deleted, in the place it came from. */
+export function restore(store: Store, deleted: Deleted): Store {
+  if (deleted.kind === 'project') {
+    const projects = [...store.projects]
+    projects.splice(Math.min(deleted.index, projects.length), 0, deleted.project)
+    return {
+      ...store,
+      projects,
+      activeProjectId: deleted.project.id,
+      activeSheetId: deleted.project.sheets[0].id,
+    }
+  }
+
+  const project = store.projects.find((candidate) => candidate.id === deleted.projectId)
+  if (!project) return store
+  const sheets = [...project.sheets]
+  sheets.splice(Math.min(deleted.index, sheets.length), 0, deleted.sheet)
+  return {
+    ...replaceProject(store, { ...project, sheets }),
+    activeProjectId: project.id,
+    activeSheetId: deleted.sheet.id,
+  }
 }
 
 /**

@@ -10,6 +10,8 @@ import {
   toNumberIn,
 } from './units'
 import { symbolToTex, toTex, valueToTex, sameTex } from './tex'
+import { definitionIndex, parseSolve, solve, SolveError, type SolveSetup } from './solve'
+import { builtins } from './builtins'
 import {
   collectSymbols,
   propagate,
@@ -259,7 +261,9 @@ function evaluateStatement(
     const warning =
       previous === undefined
         ? undefined
-        : `${name} was ${formatValue(previous, precision)} above — this redefines it for the lines below.`
+        : typeof previous === 'function'
+          ? `${name} is a built-in function — this replaces it for the lines below.`
+          : `${name} was ${formatValue(previous, precision)} above — this redefines it for the lines below.`
 
     if (isAssignment) {
       context.scope[name!] = value
@@ -307,6 +311,76 @@ function evaluateStatement(
 }
 
 /**
+ * `b_req = solve sigma = f_ck for b`
+ *
+ * Everything above the variable's own definition is already computed, so the
+ * solver starts from the scope as it stood there and re-runs only the lines in
+ * between on each try. That keeps a solve on a long sheet cheap, and it means
+ * the variable can be buried ten steps up the chain from the thing being
+ * matched.
+ */
+function evaluateSolve(
+  line: string,
+  context: Context,
+  options: Required<Pick<SheetOptions, 'precision' | 'mode'>>,
+  defined: Set<string>,
+  lines: string[],
+  index: number,
+  snapshots?: Context[],
+): Line {
+  const request = parseSolve(line)!
+  const { precision } = options
+
+  try {
+    const defined_at = definitionIndex(lines, request.variable, index)
+    let setup: SolveSetup
+
+    if (defined_at < 0) {
+      // Not defined above: nothing to replay, and a range is compulsory.
+      setup = { scope: { ...context.scope }, replay: [], reference: undefined }
+    } else if (snapshots && defined_at >= 1 && snapshots[defined_at - 1]) {
+      setup = {
+        scope: { ...snapshots[defined_at - 1].scope },
+        replay: lines.slice(defined_at + 1, index),
+        reference: context.scope[request.variable],
+      }
+    } else {
+      // No snapshots (a nested run): replay the whole prefix bar the definition.
+      setup = {
+        scope: builtins(),
+        replay: lines.slice(0, index).filter((_, at) => at !== defined_at),
+        reference: context.scope[request.variable],
+      }
+    }
+
+    const { value } = solve(request, setup)
+
+    context.scope[request.name] = value
+    const node = math.parse(`${request.name} = ${formatValue(value, precision)}`)
+    context.definitions.push({ name: request.name, node })
+
+    const shown = formatValue(value, precision)
+    const equation = `${toTex(math.parse(request.target), context.scope)} = ${toTex(
+      math.parse(request.goal),
+      context.scope,
+    )}`
+    return {
+      kind: 'calc',
+      tex: `${equation} \\;\\Rightarrow\\; ${symbolToTex(request.name, context.scope)} = ${valueToTex(
+        shown,
+        context.scope,
+      )}`,
+      summary: `= ${shown}`,
+    }
+  } catch (error) {
+    if (error instanceof SolveError) {
+      return { kind: 'error', source: line, message: error.message }
+    }
+    return { kind: 'error', source: line, message: explain(error, defined) }
+  }
+}
+
+/**
  * Replace every symbol with its current value, so a reader can see the numbers
  * that went in. This substituted middle stage is the point of the product.
  */
@@ -338,6 +412,9 @@ function evaluateTable(
   context: Context,
   precision: number,
   defined: Set<string>,
+  /** `table steel` publishes its columns as steel.<column>, so the sheet can
+   *  interpolate down them or sum them. */
+  tableName?: string,
 ): Line {
   const [headerRow, ...dataRows] = block
   if (!headerRow) return { kind: 'error', source: 'table', message: 'A table needs a header row.' }
@@ -439,11 +516,29 @@ function evaluateTable(
     })
   })
 
+  // A named table hands its columns to the sheet as arrays: values where a cell
+  // held a quantity, the label itself where it held a name.
+  if (tableName) {
+    const published: Record<string, unknown[]> = {}
+    columns.forEach((column, index) => {
+      published[column.name] = grid.map((row) => {
+        const cell = row[index]
+        if (!cell) return null
+        if (cell.kind === 'value') return cell.value
+        if (cell.kind === 'verdict') return cell.pass
+        return cell.text
+      })
+    })
+    context.scope[tableName] = published
+  }
+
   return {
     kind: 'table',
     headers: columns.map((column) => column.name),
     rows,
-    summary: `${rows.length} row${rows.length === 1 ? '' : 's'}`,
+    summary: tableName
+      ? `${rows.length} row${rows.length === 1 ? '' : 's'}, as ${tableName}.${columns[0].name}`
+      : `${rows.length} row${rows.length === 1 ? '' : 's'}`,
   }
 }
 
@@ -576,13 +671,14 @@ function runLines(
     } else if (/^plot\b/.test(line)) {
       result = evaluatePlot(line, context, defined)
     } else if (/^table\b/.test(line)) {
+      const named = line.match(/^table\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/)
       const block: string[] = []
       let cursor = index + 1
       while (cursor < lines.length && lines[cursor].trim() !== 'end') {
         if (lines[cursor].trim() !== '') block.push(lines[cursor])
         cursor += 1
       }
-      result = evaluateTable(block, context, options.precision, defined)
+      result = evaluateTable(block, context, options.precision, defined, named?.[1])
       results.push(result)
       snapshots?.push(cloneContext(context))
       for (let filler = index + 1; filler <= Math.min(cursor, lines.length - 1); filler += 1) {
@@ -591,6 +687,8 @@ function runLines(
       }
       index = cursor
       continue
+    } else if (parseSolve(line)) {
+      result = evaluateSolve(line, context, options, defined, lines, index, snapshots)
     } else {
       result = evaluateStatement(line, context, options, defined)
     }
@@ -632,7 +730,7 @@ export function evaluateSheet(source: string, options: SheetOptions = {}): Line[
   // Incremental recompute: everything above the first edited line is unchanged,
   // because evaluation is strictly sequential.
   let start = 0
-  let context: Context = { scope: {}, sigmas: {}, definitions: [] }
+  let context: Context = { scope: builtins(), sigmas: {}, definitions: [] }
   const results: Line[] = []
   const snapshots: Context[] = []
 

@@ -42,6 +42,19 @@ const seed = {
  * store written with page.evaluate() is wiped by the next reload unless the
  * newest init script carries it. Every re-seed uses this.
  */
+// A real FileSystemFileHandle, from the origin's private file system: cloneable
+// and storable in IndexedDB exactly like one from a real file picker, so the
+// whole "keep a copy on disk" path can be exercised without a dialog.
+await page.addInitScript(() => {
+  const open = async () => {
+    const root = await navigator.storage.getDirectory()
+    return root.getFileHandle('verify.longhand.json', { create: true })
+  }
+  window.showSaveFilePicker = open
+  window.showOpenFilePicker = async () => [await open()]
+  window.__readDisk = async () => (await (await open()).getFile()).text()
+})
+
 const seedWith = async (store) => {
   await page.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), store)
   await page.goto('http://localhost:4173/')
@@ -323,7 +336,211 @@ await page.waitForSelector('.panel.help')
   await page.emulateMedia({ media: 'screen' })
 }
 
-// 15. nothing clipped or overflowing, in either theme and at phone width
+// 15. solve, and a named table read between the rows
+await seedWith({
+  ...seed,
+  projects: [
+    {
+      ...seed.projects[0],
+      sheets: [
+        {
+          id: 'm',
+          name: 'Maths',
+          source: `# Maths
+M = 250 kN*m
+f_ck = 30 MPa
+h = 500 mm
+b = 300 mm
+W = b*h^2/6
+sigma = M/W
+b_req = solve sigma = f_ck for b
+
+table steel
+  profile | hs     | A
+  IPE200  | 200 mm | 2850 mm^2
+  IPE300  | 300 mm | 5380 mm^2
+end
+A_mid = interp(250 mm, steel.hs, steel.A)
+A_300 = lookup("IPE300", steel.profile, steel.A)
+A_all = sum(steel.A)
+`,
+        },
+      ],
+    },
+  ],
+  activeSheetId: 'm',
+})
+{
+  // KaTeX sets its spaces with glyph elements, so the text comes back with
+  // non-breaking and thin spaces in it: compare on collapsed whitespace.
+  const document = (await page.$eval('.output-pane', (e) => e.textContent)).replace(/\s+/g, ' ')
+  const has = (text) => document.includes(text)
+  check('solve gives the width that meets the limit', /⇒\s*b\s*req\s*=\s*200 mm/.test(document),
+    document.match(/⇒.{0,24}/)?.[0] ?? 'not found')
+  check('interp reads between the rows', has('4115 mm'),
+    document.match(/4115.{0,10}/)?.[0] ?? 'not found')
+  check('lookup finds the row', has('5380 mm'))
+  check('sum adds a named column', has('8230 mm'), document.match(/8230.{0,10}/)?.[0] ?? 'not found')
+  const errors = await page.$$('.line-error, .error')
+  check('none of it errors', errors.length === 0, `${errors.length} error lines`)
+}
+
+// 16. keyboard shortcuts and the undo for a deleted sheet
+await seedWith(seed)
+{
+  const state = async () => page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
+  await page.keyboard.press('Alt+h')
+  await page.waitForTimeout(200)
+  check('Alt+H opens Help', !!(await page.$('.panel.help')))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(200)
+  check('Escape closes it', !(await page.$('.panel')))
+
+  const before = (await state()).activeSheetId
+  await page.keyboard.press('Alt+BracketRight')
+  await page.waitForTimeout(250)
+  check('Alt+] moves to the next sheet', (await state()).activeSheetId !== before,
+    `${before} -> ${(await state()).activeSheetId}`)
+  await page.keyboard.press('Alt+BracketLeft')
+  await page.waitForTimeout(250)
+  check('Alt+[ moves back', (await state()).activeSheetId === before)
+
+  const sheets = (await state()).projects[0].sheets.length
+  await page.keyboard.press('Alt+n')
+  await page.waitForTimeout(250)
+  check('Alt+N adds a sheet', (await state()).projects[0].sheets.length === sheets + 1)
+
+  const del = await page.$('.sheets-foot button:has-text("Delete")')
+  await del.click()
+  await del.click()
+  await page.waitForTimeout(300)
+  check('the deleted sheet is gone', (await state()).projects[0].sheets.length === sheets)
+  const bar = await page.$('.undo-bar')
+  check('an undo is offered', !!bar, bar ? (await bar.textContent()).slice(0, 60) : 'no bar')
+  await page.click('.undo-bar button:has-text("Undo")')
+  await page.waitForTimeout(300)
+  const restored = await state()
+  check('undo puts it back', restored.projects[0].sheets.length === sheets + 1)
+  check('and lands on it', restored.projects[0].sheets.at(-1).id === restored.activeSheetId)
+}
+
+// 17. keeping a copy on disk
+await seedWith(seed)
+{
+  const panelText = () => page.$eval('.panel', (e) => e.textContent)
+  await page.click('button:has-text("Settings")')
+  await page.waitForSelector('.panel')
+  await page.click('button:has-text("Keep a copy on disk")')
+  await page.waitForTimeout(700)
+  check('the file is connected', /Saving to verify/.test(await panelText()),
+    (await panelText()).match(/Saving to \S+/)?.[0] ?? 'not saving')
+
+  await page.click('button:has-text("Settings")')
+  await page.click('.cm-content')
+  await page.keyboard.type('\nfrom_the_test = 5 mm')
+  await page.waitForTimeout(1600)
+  const written = await page.evaluate(() => window.__readDisk())
+  check('an edit reaches the file', written.includes('from_the_test'), `${written.length} bytes`)
+
+  await page.reload()
+  await page.waitForSelector('.sheet-page')
+  await page.waitForTimeout(900)
+  await page.click('button:has-text("Settings")')
+  await page.waitForSelector('.panel')
+  check('the file is still connected after a reload', /Saving to verify/.test(await panelText()))
+
+  // a write that fails asks to reconnect rather than pretending to save
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory()
+    const handle = await root.getFileHandle('verify.longhand.json', { create: true })
+    const proto = Object.getPrototypeOf(handle)
+    window.__realWrite = proto.createWritable
+    proto.createWritable = async () => {
+      throw new Error('permission withdrawn')
+    }
+  })
+  await page.click('button:has-text("Settings")')
+  await page.click('.cm-content')
+  await page.keyboard.type('\nagain = 1')
+  await page.waitForTimeout(1700)
+  await page.click('button:has-text("Settings")')
+  await page.waitForSelector('.panel')
+  check('a failed write asks to reconnect', /Reconnect verify/.test(await panelText()),
+    (await panelText()).match(/Reconnect \S+/)?.[0] ?? 'no reconnect')
+
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory()
+    const handle = await root.getFileHandle('verify.longhand.json', { create: true })
+    Object.getPrototypeOf(handle).createWritable = window.__realWrite
+  })
+  await page.click('button:has-text("Reconnect")')
+  await page.waitForTimeout(1300)
+  check('and reconnecting resumes it', /Saving to verify/.test(await panelText()))
+  await page.click('button:has-text("Stop saving to the file")')
+  await page.waitForTimeout(300)
+  check('stopping goes back to this browser only',
+    /stored in this browser only/.test(await panelText()))
+  await page.click('button:has-text("Settings")')
+}
+
+// 18. real page numbers
+{
+  const long = ['# Beam check', 'b = 300 mm', 'h = 500 mm', 'M = 250 kN*m']
+  for (let i = 0; i < 40; i += 1) long.push(`W_${i} = b*h^2/${i + 6}`)
+  await seedWith({
+    ...seed,
+    projects: [
+      {
+        ...seed.projects[0],
+        sheets: [
+          { id: 'a', name: 'Beam check', source: long.join('\n') },
+          { id: 'b', name: 'Slab', source: '# Slab check\nt = 200 mm\n' },
+        ],
+      },
+    ],
+    activeSheetId: 'a',
+  })
+  await page.click('button:has-text("Project")')
+  await page.waitForSelector('.panel')
+  await page.click('button:has-text("Preview whole project")')
+  await page.waitForTimeout(400)
+  await page.click('button:has-text("Number the pages")')
+  await page.waitForFunction(() => document.querySelectorAll('.pagedjs_page').length > 0, null,
+    { timeout: 20000 })
+  await page.waitForTimeout(1200)
+  const pages = await page.$$eval('.pagedjs_page', (els) => els.length)
+  check('the document is cut into pages', pages >= 2, `${pages} pages`)
+
+  const numbering = await page.$$eval('.pagedjs_page', (els) =>
+    els.map((element) => {
+      const foot = element.querySelector('.pagedjs_margin-bottom-right .pagedjs_margin-content')
+      const head = element.querySelector('.pagedjs_margin-top-left .pagedjs_margin-content')
+      return {
+        foot: foot ? getComputedStyle(foot, '::after').content : '',
+        head: head ? getComputedStyle(head, '::after').content : '',
+      }
+    }))
+  check('every page is numbered out of the total',
+    numbering.every((n) => n.foot.includes('counter(page)') && n.foot.includes('counter(pages)')),
+    JSON.stringify(numbering[0]))
+  check('each page carries its sheet title',
+    numbering.some((n) => n.head.includes('Beam check')) &&
+      numbering.some((n) => n.head.includes('Slab check')),
+    JSON.stringify([...new Set(numbering.map((n) => n.head))]))
+
+  const hidden = await page.$eval('.output-pane', (e) => {
+    const unpaginated = e.querySelector(':scope > .sheet-page')
+    return unpaginated ? getComputedStyle(unpaginated).display : 'none'
+  })
+  check('the unpaginated copy is out of the way', hidden === 'none', hidden)
+
+  await page.click('button:has-text("Back to one long page")')
+  await page.waitForTimeout(300)
+  check('and it comes back', (await page.$$('.pagedjs_page')).length === 0)
+  await page.click('button:has-text("Close")')
+}
+
+// 19. nothing clipped or overflowing, in either theme and at phone width
 for (const [theme, width, height, tag] of [
   ['light', 1400, 900, 'light'],
   ['dark', 1400, 900, 'dark'],

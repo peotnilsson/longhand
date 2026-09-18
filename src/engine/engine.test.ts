@@ -162,3 +162,131 @@ end
     expect(strip(warm.evaluateSheet(base))).toBe(strip(warm.evaluateSheet(base)))
   })
 })
+
+describe('solve', () => {
+  const value = (source: string): string => {
+    const lines = evaluateSheet(source)
+    const last = lines.at(-1)
+    if (!last) return 'no lines'
+    if (last.kind === 'error') return `error: ${last.message}`
+    return last.kind === 'calc' ? last.summary : last.kind
+  }
+
+  it('finds the width that brings a stress to its limit', () => {
+    // sigma = M/(b h^2/6) = 30 MPa with M = 250 kN*m, h = 500 mm gives b = 200 mm
+    expect(
+      value(`M = 250 kN*m
+h = 500 mm
+b = 300 mm
+W = b*h^2/6
+sigma = M/W
+b_req = solve sigma = 30 MPa for b`),
+    ).toBe('= 200 mm')
+  })
+
+  it('works through several intermediate steps and returns the right unit', () => {
+    expect(
+      value(`q = 5 kN/m
+L = 6 m
+M = q*L^2/8
+W = 200 mm*(400 mm)^2/6
+sigma = M/W
+L_max = solve sigma = 20 MPa for L`),
+    ).toBe('= 13.06 m')
+  })
+
+  it('solves a plain expression given a range', () => {
+    expect(value('x_req = solve x^2 = 4 for x from 0 to 5')).toBe('= 2')
+  })
+
+  it('picks the root inside the range on a nonlinear problem', () => {
+    // x^2 - 4x = -3 has roots at 1 and 3
+    expect(value('f = 0\nx_req = solve x^2 - 4*x = -3 for x from 0 to 1.5')).toBe('= 1')
+    expect(value('f = 0\nx_req = solve x^2 - 4*x = -3 for x from 2 to 10')).toBe('= 3')
+  })
+
+  it('binds the answer for the lines below', () => {
+    expect(
+      value(`h = 500 mm
+b = 300 mm
+sigma = 250 kN*m/(b*h^2/6)
+b_req = solve sigma = 30 MPa for b
+twice = 2*b_req`),
+    ).toBe('= 400 mm')
+  })
+
+  it('says so when the two sides never meet', () => {
+    expect(value('a = 5 mm\ny = a*0 + 1 mm\ny_req = solve y = 2 mm for a')).toContain(
+      'never changes sign',
+    )
+  })
+
+  it('asks for a range when the variable has no value above', () => {
+    expect(value('y_req = solve q = 2 mm for q')).toContain('from')
+  })
+
+  it('refuses to match quantities of different kinds', () => {
+    expect(value('a = 5 mm\ny = a*2\ny_req = solve y = 3 MPa for a')).toContain('error')
+  })
+})
+
+describe('named tables', () => {
+  const sheet = `table steel
+  section | h | A
+  IPE200 | 200 mm | 2850 mm^2
+  IPE300 | 300 mm | 5380 mm^2
+  IPE400 | 400 mm | 8450 mm^2
+end
+`
+  const last = (source: string): string => {
+    const lines = evaluateSheet(sheet + source)
+    const line = lines.at(-1)
+    if (!line) return 'no lines'
+    if (line.kind === 'error') return `error: ${line.message}`
+    return line.kind === 'calc' ? line.summary : line.kind
+  }
+
+  it('interpolates between two rows', () => {
+    expect(last('A_mid = interp(250 mm, steel.h, steel.A)')).toBe('= 4115 mm^2')
+  })
+
+  it('interpolates down a column that runs the other way', () => {
+    expect(
+      last(`table down
+  x | y
+  10 s | 1 m
+  5 s | 3 m
+  1 s | 7 m
+end
+z = interp(7 s, down.x, down.y)`),
+    ).toBe('= 2.2 m')
+  })
+
+  it('refuses to extrapolate past the last row', () => {
+    expect(last('A = interp(600 mm, steel.h, steel.A)')).toContain('outside the table')
+  })
+
+  it('looks a row up by its label', () => {
+    expect(last('A = lookup("IPE300", steel.section, steel.A)')).toBe('= 5380 mm^2')
+  })
+
+  it('lists what is there when the label is not', () => {
+    const message = last('A = lookup("HEA200", steel.section, steel.A)')
+    expect(message).toContain('IPE200')
+  })
+
+  it('sums and takes the largest of a column', () => {
+    expect(last('A_total = sum(steel.A)')).toBe('= 16680 mm^2')
+    expect(last('h_max = max(steel.h)')).toBe('= 400 mm')
+  })
+
+  it('leaves an unnamed table out of the scope', () => {
+    expect(
+      last(`table
+  s | b
+  A | 2 mm
+end
+z = interp(1 mm, steel.h, steel.A)`),
+    ).toContain('outside the table')
+  })
+})
