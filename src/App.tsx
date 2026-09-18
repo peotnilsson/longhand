@@ -414,101 +414,115 @@ export default function App() {
             <button onClick={() => fileInput.current?.click()}>Open</button>
             <button onClick={save}>Save</button>
             <button onClick={() => window.print()}>Print</button>
-            <label className="field">
-              sig&nbsp;figs
-              <select
-                value={store.precision}
-                onChange={(event) =>
-                  setStore((current) => ({ ...current, precision: Number(event.target.value) }))
-                }
-              >
-                {[2, 3, 4, 5, 6].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              tolerance
-              <select
-                value={store.mode}
-                onChange={(event) =>
-                  setStore((current) => ({
-                    ...current,
-                    mode: event.target.value as ToleranceMode,
-                  }))
-                }
-              >
-                <option value="quadrature">statistical</option>
-                <option value="worst">worst case</option>
-              </select>
-            </label>
           </div>
           <input ref={fileInput} type="file" accept=".calc,.txt,text/plain" onChange={open} hidden />
         </div>
 
         {panel === 'meta' && (
           <div className="panel meta-editor">
-            {(
-              [
-                ['project', 'Project'],
-                ['author', 'Author'],
-                ['revision', 'Revision'],
-                ['checkedBy', 'Checked by'],
-              ] as [keyof Meta, string][]
-            ).map(([field, caption]) => (
-              <label key={field}>
-                {caption}
-                <input
-                  value={active.meta[field]}
-                  onChange={(event) =>
-                    update({ meta: { ...active.meta, [field]: event.target.value } })
-                  }
-                />
-              </label>
-            ))}
+            <section>
+              <h3>Title block</h3>
+              {(
+                [
+                  ['project', 'Project'],
+                  ['author', 'Author'],
+                  ['revision', 'Revision'],
+                  ['checkedBy', 'Checked by'],
+                ] as [keyof Meta, string][]
+              ).map(([field, caption]) => (
+                <label key={field}>
+                  <span>{caption}</span>
+                  <input
+                    value={active.meta[field]}
+                    onChange={(event) =>
+                      update({ meta: { ...active.meta, [field]: event.target.value } })
+                    }
+                  />
+                </label>
+              ))}
+            </section>
           </div>
         )}
 
         {panel === 'settings' && (
           <div className="panel settings">
-            <label>
-              Appearance
-              <select
-                value={store.settings.theme}
-                onChange={(event) => setSettings({ theme: event.target.value as Theme })}
-              >
-                <option value="system">Follow the system</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </label>
-            <label>
-              Your name
-              <input
-                value={store.settings.author}
-                placeholder="goes on new sheets"
-                onChange={(event) => setSettings({ author: event.target.value })}
-              />
-            </label>
-            <label>
-              Default project
-              <input
-                value={store.settings.project}
-                placeholder="goes on new sheets"
-                onChange={(event) => setSettings({ project: event.target.value })}
-              />
-            </label>
-            <div className="settings-data">
-              <span className="settings-caption">
-                Everything is stored in this browser only.
-              </span>
+            <section>
+              <h3>Appearance</h3>
+              <label>
+                <span>Theme</span>
+                <select
+                  value={store.settings.theme}
+                  onChange={(event) => setSettings({ theme: event.target.value as Theme })}
+                >
+                  <option value="system">Follow the system</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+            </section>
+
+            <section>
+              <h3>Numbers</h3>
+              <label>
+                <span>Significant figures</span>
+                <select
+                  value={store.precision}
+                  onChange={(event) =>
+                    setStore((current) => ({ ...current, precision: Number(event.target.value) }))
+                  }
+                >
+                  {[2, 3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Tolerances</span>
+                <select
+                  value={store.mode}
+                  onChange={(event) =>
+                    setStore((current) => ({
+                      ...current,
+                      mode: event.target.value as ToleranceMode,
+                    }))
+                  }
+                >
+                  <option value="quadrature">Statistical</option>
+                  <option value="worst">Worst case</option>
+                </select>
+              </label>
+            </section>
+
+            <section>
+              <h3>Profile</h3>
+              <label>
+                <span>Your name</span>
+                <input
+                  value={store.settings.author}
+                  onChange={(event) => setSettings({ author: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Default project</span>
+                <input
+                  value={store.settings.project}
+                  onChange={(event) => setSettings({ project: event.target.value })}
+                />
+              </label>
+              <p className="hint">Fills in the title block of new sheets.</p>
+            </section>
+
+            <section>
+              <h3>Data</h3>
+              <p className="hint">Everything is stored in this browser only.</p>
               <div className="settings-buttons">
                 <button onClick={exportAll}>Export backup</button>
                 <button onClick={() => backupInput.current?.click()}>Restore backup</button>
               </div>
-            </div>
+            </section>
+
             <input
               ref={backupInput}
               type="file"

@@ -17,22 +17,45 @@ import { unitNames, type Line } from './engine'
 const KEYWORDS = ['table', 'end', 'plot', 'import', 'vs', 'from', 'to']
 
 /** A deliberately small tokenizer — this is a calculation sheet, not a language. */
-const sheetLanguage = StreamLanguage.define({
+const sheetLanguage = StreamLanguage.define<{ afterNumber: boolean }>({
   name: 'longhand',
-  token(stream) {
-    if (stream.sol() && stream.match(/^\s*#.*/)) return 'heading'
+  startState: () => ({ afterNumber: false }),
+  token(stream, state) {
+    if (stream.sol()) {
+      state.afterNumber = false
+      if (stream.match(/^\s*#.*/)) return 'heading'
+    }
     if (stream.match('//')) {
       stream.skipToEnd()
       return 'comment'
     }
-    if (stream.match(/^->/) || stream.match(/^(?:±|\+-)/)) return 'operator'
+    if (stream.match(/^->/) || stream.match(/^(?:\u00b1|\+-)/)) {
+      state.afterNumber = false
+      return 'operator'
+    }
     if (stream.match(/^"[^"]*"/)) return 'string'
-    if (stream.match(new RegExp(`^\\b(?:${KEYWORDS.join('|')})\\b`))) return 'keyword'
-    if (stream.match(/^\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/)) return 'number'
-    if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) return 'variableName'
+    if (stream.match(new RegExp(`^\\b(?:${KEYWORDS.join('|')})\\b`))) {
+      state.afterNumber = false
+      return 'keyword'
+    }
+    if (stream.match(/^\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/)) {
+      state.afterNumber = true
+      return 'number'
+    }
+    if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
+      // An identifier straight after a number is a unit: "300 mm", "250 kN*m".
+      // Anywhere else it is a variable, so a beam height h is not read as hours.
+      return state.afterNumber ? 'unit' : 'variableName'
+    }
+    if (stream.match(/^[=,()|]/)) {
+      state.afterNumber = false
+      return 'operator'
+    }
+    if (stream.match(/^[-+*/^]/)) return 'operator'
     stream.next()
     return null
   },
+  tokenTable: { unit: tags.unit },
 })
 
 class ResultWidget extends WidgetType {
@@ -164,23 +187,24 @@ const completion = autocompletion({
 })
 
 /**
- * Near-monochrome on purpose. CodeMirror's default highlight style is built for
- * light backgrounds and turns variables and operators almost invisible in dark
- * mode, and a calculation sheet does not need a rainbow: weight and a faint
- * grey for comments are enough to scan by, and both work in either theme.
+ * Restrained but real colour: enough to tell a unit from a variable at a
+ * glance, nothing decorative. The values are CSS variables so a single
+ * highlight style serves both themes.
  */
 const highlight = HighlightStyle.define([
-  { tag: tags.heading, color: 'var(--ink)', fontWeight: '600' },
-  { tag: tags.comment, color: 'var(--faint)' },
-  { tag: tags.keyword, color: 'var(--ink)', fontWeight: '600' },
-  { tag: tags.number, color: 'var(--ink)' },
-  { tag: tags.string, color: 'var(--muted)' },
-  { tag: tags.operator, color: 'var(--muted)' },
-  { tag: tags.variableName, color: 'var(--ink)' },
+  { tag: tags.heading, color: 'var(--syn-heading)', fontWeight: '600' },
+  { tag: tags.comment, color: 'var(--syn-comment)' },
+  { tag: tags.keyword, color: 'var(--syn-keyword)', fontWeight: '600' },
+  { tag: tags.number, color: 'var(--syn-number)' },
+  { tag: tags.unit, color: 'var(--syn-unit)' },
+  { tag: tags.string, color: 'var(--syn-string)' },
+  { tag: tags.operator, color: 'var(--syn-operator)' },
+  { tag: tags.variableName, color: 'var(--syn-variable)' },
 ])
 
 const theme = EditorView.theme({
-  '&': { fontSize: '14px', backgroundColor: 'transparent', color: 'var(--ink)' },
+  '&': { fontSize: '14px', backgroundColor: 'var(--editor-bg)', color: 'var(--ink)' },
+  '.cm-scroller': { backgroundColor: 'var(--editor-bg)' },
   '.cm-content': {
     fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
     padding: '12px 0',
@@ -244,6 +268,7 @@ export function Editor({
       value={value}
       onChange={onChange}
       extensions={extensions}
+      theme="none"
       basicSetup={{
         lineNumbers: true,
         foldGutter: false,

@@ -15,6 +15,16 @@
   --warn-bg: #fdf6e8;
   --error: #b3261e;
   --error-bg: #fdf0ef;
+
+  --editor-bg: #faf9f7;
+  --syn-heading: #1a1a18;
+  --syn-comment: #3f7a43;
+  --syn-keyword: #7a3fa0;
+  --syn-number: #0a6b52;
+  --syn-unit: #8a5a00;
+  --syn-string: #a3341f;
+  --syn-operator: #6b6b66;
+  --syn-variable: #14396b;
 }
 
 /* Dark is the same document in a dimmer room: same hierarchy, same restraint. */
@@ -36,6 +46,16 @@
     --warn-bg: #2a2214;
     --error: #f0857d;
     --error-bg: #2b1a18;
+
+    --editor-bg: #171615;
+    --syn-heading: #e8e6e1;
+    --syn-comment: #7fa06b;
+    --syn-keyword: #c79ae0;
+    --syn-number: #b5cea8;
+    --syn-unit: #dcae62;
+    --syn-string: #e3907c;
+    --syn-operator: #a8a49c;
+    --syn-variable: #9cdcfe;
   }
 }
 
@@ -56,6 +76,16 @@
   --warn-bg: #2a2214;
   --error: #f0857d;
   --error-bg: #2b1a18;
+
+  --editor-bg: #171615;
+  --syn-heading: #e8e6e1;
+  --syn-comment: #7fa06b;
+  --syn-keyword: #c79ae0;
+  --syn-number: #b5cea8;
+  --syn-unit: #dcae62;
+  --syn-string: #e3907c;
+  --syn-operator: #a8a49c;
+  --syn-variable: #9cdcfe;
 }
 
 * {
@@ -150,12 +180,19 @@ body {
 .icon {
   font: inherit;
   font-size: 12px;
-  padding: 4px 8px;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--rule);
+  padding: 4px 9px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 5px;
   cursor: pointer;
+}
+
+.sheets-foot button:hover,
+.toolbar button:hover,
+.icon:hover {
+  color: var(--ink);
+  background: var(--hover);
 }
 
 .sheets-foot button {
@@ -238,59 +275,63 @@ body {
 }
 
 .panel {
-  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 18px 18px 20px;
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
 }
 
-.panel label {
+.panel section {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
+  gap: 9px;
+}
+
+.panel h3 {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.panel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.panel label span {
   color: var(--muted);
 }
 
 .panel input,
 .panel select {
+  width: 210px;
+  max-width: 58%;
   min-width: 0;
   font: inherit;
   font-size: 13px;
-  padding: 4px 6px;
+  padding: 4px 7px;
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--rule);
   border-radius: 5px;
 }
 
-.panel input::placeholder {
-  color: var(--faint);
+.panel input:focus,
+.panel select:focus {
+  outline: none;
+  border-color: var(--rule-strong);
 }
 
-.meta-editor {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
-}
-
-.settings {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
-}
-
-.settings-data {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding-top: 10px;
-  border-top: 1px solid var(--rule);
-}
-
-.settings-caption {
+.hint {
+  margin: 0;
   font-size: 11px;
   color: var(--faint);
 }
@@ -298,21 +339,23 @@ body {
 .settings-buttons {
   display: flex;
   gap: 6px;
+  margin-top: 2px;
 }
 
 .settings-buttons button {
   font: inherit;
   font-size: 12px;
-  padding: 4px 8px;
-  color: var(--ink);
-  background: var(--paper);
+  padding: 4px 9px;
+  color: var(--muted);
+  background: transparent;
   border: 1px solid var(--rule);
   border-radius: 5px;
   cursor: pointer;
 }
 
 .settings-buttons button:hover {
-  border-color: var(--rule-strong);
+  color: var(--ink);
+  background: var(--hover);
 }
 
 .editor {
@@ -737,10 +780,5 @@ body {
 
   .sheet-page {
     padding: 16px 20px 64px;
-  }
-
-  .meta-editor,
-  .settings {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
