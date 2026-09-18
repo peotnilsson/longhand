@@ -36,6 +36,15 @@ carry on typing into nothing.
 name — so two sheets with the same name shadow each other. The project panel warns when
 that happens.
 
+Deleting a sheet asks twice and then lands you on the sheet *above* it, so clearing several
+is press, confirm, press, confirm without the button moving under your hand. The last sheet
+in a project will not delete.
+
+The Help panel in the toolbar is the syntax reference, and adds a worked example sheet on
+request. The profile button at the foot of the sidebar holds your name — which goes in the
+title block of new projects — and says plainly what an account would be for, since there
+isn't one.
+
 ## Syntax
 
 ```

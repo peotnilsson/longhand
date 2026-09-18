@@ -6,6 +6,7 @@ import {
   migrate,
   moveSheet,
   moveSheetToProject,
+  removeSheet,
   type Store,
 } from './store'
 
@@ -128,6 +129,35 @@ describe('sheet order and moves', () => {
   it('will not empty a project by moving its last sheet out', () => {
     const store = moveSheetToProject(build(), 's9', build().projects[0].id)
     expect(order(store, 1)).toEqual(['Nine'])
+  })
+
+  it('lands on the sheet above when one is deleted', () => {
+    const store = removeSheet(build(), 's2')
+    expect(order(store)).toEqual(['One', 'Three'])
+    expect(store.activeSheetId).toBe('s1')
+  })
+
+  it('lands on the new first sheet when the first one is deleted', () => {
+    const start = { ...build(), activeSheetId: 's1' }
+    const store = removeSheet(start, 's1')
+    expect(order(store)).toEqual(['Two', 'Three'])
+    expect(store.activeSheetId).toBe('s2')
+  })
+
+  it('deletes the whole way down without ever emptying the project', () => {
+    let store = build()
+    store = { ...store, activeSheetId: 's3' }
+    store = removeSheet(store, store.activeSheetId)
+    store = removeSheet(store, store.activeSheetId)
+    expect(order(store)).toEqual(['One'])
+    expect(store.activeSheetId).toBe('s1')
+    // the last one will not go
+    expect(order(removeSheet(store, 's1'))).toEqual(['One'])
+  })
+
+  it('leaves the selection alone when some other sheet is deleted', () => {
+    const store = removeSheet(build(), 's3')
+    expect(store.activeSheetId).toBe('s2')
   })
 
   it('finds names that would shadow each other on import', () => {

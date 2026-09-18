@@ -322,6 +322,29 @@ export function moveSheet(store: Store, sheetId: string, offset: number): Store 
   return replaceProject(store, { ...project, sheets })
 }
 
+/**
+ * Delete a sheet and land on the one above it, so deleting several in a row is
+ * press, confirm, press, confirm without the button moving or the selection
+ * jumping back to the top of the project.
+ */
+export function removeSheet(store: Store, sheetId: string): Store {
+  const project = store.projects.find((candidate) =>
+    candidate.sheets.some((sheet) => sheet.id === sheetId),
+  )
+  if (!project || project.sheets.length === 1) return store
+
+  const index = project.sheets.findIndex((sheet) => sheet.id === sheetId)
+  const sheets = project.sheets.filter((sheet) => sheet.id !== sheetId)
+  // The one above, or the new first sheet when the first one went.
+  const next = sheets[Math.max(0, index - 1)]
+
+  return {
+    ...replaceProject(store, { ...project, sheets }),
+    activeProjectId: project.id,
+    activeSheetId: store.activeSheetId === sheetId ? next.id : store.activeSheetId,
+  }
+}
+
 /** Move a sheet into another project, never leaving a project with no sheets. */
 export function moveSheetToProject(store: Store, sheetId: string, targetId: string): Store {
   const source = store.projects.find((candidate) =>

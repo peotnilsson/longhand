@@ -174,7 +174,67 @@ const stillStale = await page.$('.output-pane.stale')
 check('typing not blocked on a 300-line sheet', typed < 600, `${typed}ms for 4 keystrokes`)
 check('stale clears once caught up', !stillStale)
 
-// 10. nothing clipped or overflowing, in either theme and at phone width
+// 10. delete lands on the sheet above, so deleting several in a row is quick
+await page.evaluate((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), seed)
+await page.reload()
+await page.waitForSelector('.sheet-page')
+{
+  const active = async () => (await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store'))))
+  const del = await page.$('.sheets-foot button:has-text("Delete")')
+  // start on the last sheet and delete twice, pressing the same button four times
+  await (await page.$$('.tree .sheet'))[2].click()
+  await page.waitForTimeout(150)
+  await del.click(); await del.click()
+  await page.waitForTimeout(200)
+  const first = await active()
+  check('delete lands on the sheet above', first.activeSheetId === 's2',
+    `now on ${first.activeSheetId}`)
+  check('the button stayed put', (await del.textContent()) === 'Delete')
+  await del.click(); await del.click()
+  await page.waitForTimeout(200)
+  const second = await active()
+  check('a second delete without moving the mouse', second.projects[0].sheets.length === 1,
+    `${second.projects[0].sheets.length} left, on ${second.activeSheetId}`)
+  check('the last sheet cannot be deleted', await del.isDisabled())
+}
+
+// 11. profile
+await page.click('.profile-button')
+await page.waitForSelector('.panel')
+{
+  check('profile avatar shows initials', (await page.$eval('.avatar', (e) => e.textContent)) === 'P')
+  await page.fill('.panel input', 'Peo Nilsson')
+  await page.waitForTimeout(250)
+  check('the name reaches the avatar', (await page.$eval('.avatar', (e) => e.textContent)) === 'PN')
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
+  check('the name is kept', saved.settings.author === 'Peo Nilsson', saved.settings.author)
+  await page.click('.profile-button')
+  check('profile closes', !(await page.$('.panel')))
+}
+
+// 12. help
+await page.click('button:has-text("Help")')
+await page.waitForSelector('.panel.help')
+{
+  const codes = await page.$$eval('.panel.help .syntax code', (els) => els.map((e) => e.textContent))
+  check('help lists the syntax', codes.includes('b = 300 mm +- 2 mm') && codes.length > 10,
+    `${codes.length} examples`)
+  const before = (await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store'))))
+    .projects[0].sheets.length
+  await page.click('button:has-text("New sheet from the example")')
+  await page.waitForTimeout(300)
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
+  check('the example becomes a real sheet', after.projects[0].sheets.length === before + 1 &&
+    after.projects[0].sheets.at(-1).name === 'Example',
+    `${after.projects[0].sheets.length} sheets`)
+  await page.waitForTimeout(300)
+  const rendered = await page.$eval('.output-pane', (e) => e.textContent)
+  check('the example evaluates without an error', rendered.includes('OK') && !rendered.includes('Error'),
+    rendered.slice(0, 60))
+  await page.click('button:has-text("Help")')
+}
+
+// 13. nothing clipped or overflowing, in either theme and at phone width
 for (const [theme, width, height, tag] of [
   ['light', 1400, 900, 'light'],
   ['dark', 1400, 900, 'dark'],

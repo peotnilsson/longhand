@@ -9,11 +9,13 @@ import {
   activeSheet,
   backupAgeDays,
   duplicateNames,
+  EXAMPLE,
   loadStore,
   moveSheet,
   moveSheetToProject,
   newId,
   newProject,
+  removeSheet,
   saveStore,
   slug,
   type Project,
@@ -241,9 +243,114 @@ function SheetDocument({
   )
 }
 
+/**
+ * The reference. A calculation language is only worth having if you can find
+ * out what it does without leaving the sheet, so this lists every line kind
+ * with a real example rather than describing the app in general terms.
+ */
+function HelpPanel({ onExample }: { onExample: () => void }) {
+  const rows: [string, string][][] = [
+    [
+      ['b = 300 mm', 'A value with a unit. Any unit mathjs knows: mm, kN, MPa, kg, s, degC.'],
+      ['W = b*h^2/6', 'A formula. It shows the symbols, then your numbers substituted in, then the result.'],
+      ['sigma = M/W -> MPa', 'The arrow forces the unit the result is shown in.'],
+      ['b = 300 mm +- 2 mm', 'A tolerance. Write ± if you prefer. It propagates to everything below.'],
+      ['sigma <= f_ck', 'A check. Renders as OK or NOT OK with how much margin is left.'],
+      ['A(d) = pi*d^2/4', 'Your own function. Call it like any other: A(20 mm).'],
+      ['# Heading', 'A heading. The first one becomes the sheet title in the title block.'],
+      ['// note', 'A line of prose, for the reasoning a reviewer needs.'],
+    ],
+    [
+      ['table', 'Starts a table: one row per case, one column per quantity.'],
+      ['  s | bw | Wt = bw*h^2/6', 'The header row. A column with an = is computed for every row.'],
+      ['  A | 300 mm', 'A case. Blank cells are filled by the computed columns.'],
+      ['end', 'Closes the table.'],
+      ['plot sigma vs b from 200 mm to 400 mm', 'Sweeps one input and draws the result.'],
+      ['import "Loads"', 'Brings in the definitions from another sheet in this project, by name.'],
+    ],
+  ]
+
+  return (
+    <div className="panel help">
+      <section>
+        <h3>Lines</h3>
+        <dl className="syntax">
+          {rows[0].map(([code, text]) => (
+            <div key={code}>
+              <dt>
+                <code>{code}</code>
+              </dt>
+              <dd>{text}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section>
+        <h3>Many cases at once</h3>
+        <dl className="syntax">
+          {rows[1].map(([code, text]) => (
+            <div key={code}>
+              <dt>
+                <code>{code}</code>
+              </dt>
+              <dd>{text}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section>
+        <h3>What it does for you</h3>
+        <p className="hint">
+          Units are kept as you wrote them: a moment stays kN·m instead of collapsing into kJ, and
+          mm·mm² stays mm³. Where two units share a dimension — m and mm in a stress — it converts,
+          because the alternative is nonsense. Mixing dimensions is an error, named on the line:
+          adding a length to a pressure will not quietly give you a number.
+        </p>
+        <p className="hint">
+          A symbol used before it is defined says so rather than reading as zero, and defining one
+          twice warns you, since the lines below will use the second value. Underscores become
+          subscripts (<code>M_Ed</code>) and Greek names become Greek letters (<code>sigma</code>,{' '}
+          <code>Delta</code>).
+        </p>
+      </section>
+
+      <section>
+        <h3>Projects and printing</h3>
+        <p className="hint">
+          A project is a set of sheets with one title block, printed as one numbered package —
+          Project → Preview whole project, then Print. ↑ ↓ in the sidebar set the order sheets
+          print in. Print on its own prints the sheet you are looking at.
+        </p>
+      </section>
+
+      <section>
+        <h3>Try it</h3>
+        <div className="settings-buttons">
+          <button onClick={onExample}>New sheet from the example</button>
+        </div>
+        <p className="hint">Adds a worked beam check to this project, using every line kind above.</p>
+      </section>
+    </div>
+  )
+}
+
+type Panel = 'none' | 'meta' | 'settings' | 'profile' | 'help'
+
+/** "Peo Nilsson" -> "PN", "Peo" -> "P", nothing -> a neutral mark. */
+const initials = (name: string): string => {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '·'
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('')
+}
+
 export default function App() {
   const [store, setStore] = useState<Store>(loadStore)
-  const [panel, setPanel] = useState<'none' | 'meta' | 'settings'>('none')
+  const [panel, setPanel] = useState<Panel>('none')
   const [printingProject, setPrintingProject] = useState(false)
   const [saveFailure, setSaveFailure] = useState<'quota' | 'blocked' | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState<'sheet' | 'project' | null>(null)
@@ -313,7 +420,7 @@ export default function App() {
     }))
   }
 
-  const addSheet = () => {
+  const addSheet = (name?: string, source = '# New calculation\n\n') => {
     const id = newId()
     setStore((current) => ({
       ...current,
@@ -324,7 +431,7 @@ export default function App() {
               ...candidate,
               sheets: [
                 ...candidate.sheets,
-                { id, name: `Sheet ${candidate.sheets.length + 1}`, source: '# New calculation\n\n' },
+                { id, name: name ?? `Sheet ${candidate.sheets.length + 1}`, source },
               ],
             }
           : candidate,
@@ -355,14 +462,7 @@ export default function App() {
       return
     }
     setConfirmingDelete(null)
-    const remaining = project.sheets.filter((candidate) => candidate.id !== sheet.id)
-    setStore((current) => ({
-      ...current,
-      activeSheetId: remaining[0].id,
-      projects: current.projects.map((candidate) =>
-        candidate.id === project.id ? { ...candidate, sheets: remaining } : candidate,
-      ),
-    }))
+    setStore((current) => removeSheet(current, sheet.id))
   }
 
   const deleteProject = () => {
@@ -531,7 +631,7 @@ export default function App() {
                       </li>
                     ))}
                     <li>
-                      <button className="sheet add" onClick={addSheet}>
+                      <button className="sheet add" onClick={() => addSheet()}>
                         + Sheet
                       </button>
                     </li>
@@ -541,6 +641,14 @@ export default function App() {
             )
           })}
         </div>
+
+        <button
+          className={panel === 'profile' ? 'profile-button on' : 'profile-button'}
+          onClick={() => setPanel((current) => (current === 'profile' ? 'none' : 'profile'))}
+        >
+          <span className="avatar">{initials(store.settings.author)}</span>
+          <span className="profile-label">{store.settings.author || 'Add your name'}</span>
+        </button>
 
         <div className="sheets-foot">
           <button
@@ -590,6 +698,12 @@ export default function App() {
               onClick={() => setPanel((current) => (current === 'settings' ? 'none' : 'settings'))}
             >
               Settings
+            </button>
+            <button
+              className={panel === 'help' ? 'on' : ''}
+              onClick={() => setPanel((current) => (current === 'help' ? 'none' : 'help'))}
+            >
+              Help
             </button>
             <button onClick={() => fileInput.current?.click()}>Open</button>
             <button onClick={save}>Save</button>
@@ -747,18 +861,6 @@ export default function App() {
             </section>
 
             <section>
-              <h3>Profile</h3>
-              <label>
-                <span>Your name</span>
-                <input
-                  value={store.settings.author}
-                  onChange={(event) => setSettings({ author: event.target.value })}
-                />
-              </label>
-              <p className="hint">Fills in the title block of new projects.</p>
-            </section>
-
-            <section>
               <h3>Data</h3>
               <p className="hint">
                 Everything is stored in this browser only.{' '}
@@ -783,6 +885,40 @@ export default function App() {
             />
           </div>
         )}
+
+        {panel === 'profile' && (
+          <div className="panel">
+            <section>
+              <h3>You</h3>
+              <label>
+                <span>Your name</span>
+                <input
+                  value={store.settings.author}
+                  onChange={(event) => setSettings({ author: event.target.value })}
+                  placeholder="Peo Nilsson"
+                />
+              </label>
+              <p className="hint">
+                Goes in the title block of new projects, so a printed sheet says who did the
+                calculation.
+              </p>
+            </section>
+
+            <section>
+              <h3>Not here yet</h3>
+              {/* Named honestly rather than shown as buttons that do nothing. None of
+                  this is built, and none of it is needed to do a calculation. */}
+              <p className="hint">
+                There is no account and no server — everything lives in this browser. An account
+                would buy three things, in this order: your sheets on every machine you use,
+                revision history for a sheet you have to defend, and a project two people can
+                work on. Until then, Settings → Data is the backup.
+              </p>
+            </section>
+          </div>
+        )}
+
+        {panel === 'help' && <HelpPanel onExample={() => addSheet('Example', EXAMPLE)} />}
 
         <Editor
           value={sheet.source}
