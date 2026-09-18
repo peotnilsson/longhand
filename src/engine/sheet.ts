@@ -1,6 +1,7 @@
 import type { MathNode } from 'mathjs'
 import {
   math,
+  formatColumn,
   formatValue,
   formatLike,
   formatNumber,
@@ -350,53 +351,93 @@ function evaluateTable(
   })
 
   const inputs = columns.filter((column) => column.input)
-  const rows: TableCell[][] = []
+
+  type Cell =
+    | { kind: 'value'; value: unknown }
+    | { kind: 'verdict'; pass: boolean }
+    | { kind: 'text'; text: string }
+
+  // First pass: evaluate every cell, keeping the raw values so that each column
+  // can be formatted as a whole afterwards.
+  const grid: Cell[][] = []
 
   for (const raw of dataRows) {
     const cells = raw.split('|').map((cell) => cell.trim())
     const rowScope: Record<string, unknown> = { ...context.scope }
-    const out: TableCell[] = []
+    const row: Cell[] = []
     let failed = false
 
     inputs.forEach((column, index) => {
-      if (failed) return
+      if (failed) {
+        row.push({ kind: 'text', text: '—' })
+        return
+      }
       const cell = cells[index] ?? ''
       // A bare word that is not a defined value is a label, not an expression -
       // otherwise a section called "A" would be evaluated as one ampere.
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(cell) && rowScope[cell] === undefined) {
-        out.push({ text: cell })
+        row.push({ kind: 'text', text: cell })
         return
       }
       try {
         const value = math.parse(cell).evaluate(rowScope)
         rowScope[column.name] = value
-        out.push({ text: formatValue(value, precision) })
+        row.push({ kind: 'value', value })
       } catch (error) {
-        out.push({ text: explain(error, defined) })
+        row.push({ kind: 'text', text: explain(error, defined) })
         failed = true
       }
     })
 
-    for (const column of columns.filter((c) => !c.input)) {
+    for (const column of columns.filter((candidate) => !candidate.input)) {
       if (failed) {
-        out.push({ text: '—' })
+        row.push({ kind: 'text', text: '—' })
         continue
       }
       try {
         const value = math.parse(column.expression!).evaluate(rowScope)
         rowScope[column.name] = value
-        if (typeof value === 'boolean') {
-          out.push({ text: value ? 'OK' : 'NOT OK', verdict: value ? 'pass' : 'fail' })
-        } else {
-          out.push({ text: formatValue(value, precision) })
-        }
+        row.push(
+          typeof value === 'boolean'
+            ? { kind: 'verdict', pass: value }
+            : { kind: 'value', value },
+        )
       } catch (error) {
-        out.push({ text: explain(error, defined) })
+        row.push({ kind: 'text', text: explain(error, defined) })
       }
     }
 
-    rows.push(out)
+    grid.push(row)
   }
+
+  // Second pass: format each column together.
+  const rows: TableCell[][] = grid.map(() => [])
+  columns.forEach((_column, index) => {
+    const cells = grid.map((row) => row[index])
+    const values = cells.flatMap((cell) => (cell?.kind === 'value' ? [cell.value] : []))
+    const formatted = values.length ? formatColumn(values, precision) : []
+
+    let cursor = 0
+    cells.forEach((cell, rowIndex) => {
+      if (!cell) {
+        rows[rowIndex].push({ text: '' })
+        return
+      }
+      if (cell.kind === 'value') {
+        rows[rowIndex].push({ text: formatted[cursor] ?? formatValue(cell.value, precision) })
+        cursor += 1
+        return
+      }
+      if (cell.kind === 'verdict') {
+        rows[rowIndex].push({
+          text: cell.pass ? 'OK' : 'NOT OK',
+          verdict: cell.pass ? 'pass' : 'fail',
+        })
+        return
+      }
+      rows[rowIndex].push({ text: cell.text })
+    })
+  })
 
   return {
     kind: 'table',

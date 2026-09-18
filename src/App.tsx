@@ -1,115 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { evaluateSheet, sheetTitle, type Line, type ToleranceMode } from './engine'
 import { Editor } from './editor'
 import { Plot } from './Plot'
+import {
+  activeProject,
+  activeSheet,
+  backupAgeDays,
+  duplicateNames,
+  loadStore,
+  moveSheet,
+  moveSheetToProject,
+  newId,
+  newProject,
+  saveStore,
+  slug,
+  type Project,
+  type ProjectMeta,
+  type Settings,
+  type Sheet,
+  type Store,
+  type Theme,
+} from './store'
 import './App.css'
-
-const EXAMPLE = `# Beam check - section A-A
-
-// Inputs, with manufacturing tolerances
-b     = 300 mm +- 2 mm
-h     = 500 mm +- 3 mm
-M_Ed  = 250 kN*m
-f_ck  = 30 MPa
-
-// Results keep the units you wrote: mm*mm^2 stays mm^3,
-// and a moment stays kN*m instead of collapsing into kJ
-W     = b*h^2/6
-sigma = M_Ed/W
-
-// A check renders as a verdict with the margin
-sigma <= f_ck
-
-// Your own functions
-A_circle(d) = pi*d^2/4
-A_bar = A_circle(20 mm)
-
-// A table checks many sections at once
-table
-  section | bw     | hw     | Wt = bw*hw^2/6 | st = M_Ed/Wt | ok = st <= f_ck
-  A       | 300 mm | 500 mm
-  B       | 250 mm | 450 mm
-  C       | 200 mm | 350 mm
-end
-
-// And a sweep shows sensitivity
-plot sigma vs b from 200 mm to 400 mm
-`
-
-interface Meta {
-  project: string
-  author: string
-  revision: string
-  checkedBy: string
-}
-
-interface Sheet {
-  id: string
-  name: string
-  source: string
-  meta: Meta
-}
-
-type Theme = 'system' | 'light' | 'dark'
-
-interface Settings {
-  theme: Theme
-  /** Pre-fills the title block of new sheets. */
-  author: string
-  project: string
-}
-
-interface Store {
-  sheets: Sheet[]
-  activeId: string
-  precision: number
-  mode: ToleranceMode
-  settings: Settings
-}
-
-const KEY = 'longhand:store'
-const emptyMeta = (): Meta => ({ project: '', author: '', revision: 'A', checkedBy: '' })
-const defaultSettings = (): Settings => ({ theme: 'system', author: '', project: '' })
-const newId = () => Math.random().toString(36).slice(2, 10)
-
-function loadStore(): Store {
-  try {
-    const saved = localStorage.getItem(KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved) as Store
-      if (parsed.sheets?.length) {
-        return { ...parsed, settings: { ...defaultSettings(), ...parsed.settings } }
-      }
-    }
-    // migrate the single-sheet version
-    const legacy = localStorage.getItem('longhand:source')
-    if (legacy) {
-      const id = newId()
-      return {
-        sheets: [{ id, name: sheetTitle(legacy), source: legacy, meta: emptyMeta() }],
-        activeId: id,
-        precision: 4,
-        mode: 'quadrature',
-        settings: defaultSettings(),
-      }
-    }
-  } catch {
-    /* blocked storage - start fresh */
-  }
-  const id = newId()
-  return {
-    sheets: [{ id, name: 'Beam check', source: EXAMPLE, meta: emptyMeta() }],
-    activeId: id,
-    precision: 4,
-    mode: 'quadrature',
-    settings: defaultSettings(),
-  }
-}
-
-const slug = (text: string): string =>
-  text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'calculation'
 
 function Rendered({ line }: { line: Line }) {
   switch (line.kind) {
@@ -155,26 +69,26 @@ function Rendered({ line }: { line: Line }) {
     case 'table':
       return (
         <div className="table-scroll">
-        <table className="sheet-table">
-          <thead>
-            <tr>
-              {line.headers.map((header) => (
-                <th key={header}>{header}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {line.rows.map((row, index) => (
-              <tr key={index}>
-                {row.map((cell, cellIndex) => (
-                  <td key={cellIndex} className={cell.verdict ?? ''}>
-                    {cell.text}
-                  </td>
+          <table className="sheet-table">
+            <thead>
+              <tr>
+                {line.headers.map((header) => (
+                  <th key={header}>{header}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {line.rows.map((row, index) => (
+                <tr key={index}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className={cell.verdict ?? ''}>
+                      {cell.verdict ? cell.text : <Quantity text={cell.text} />}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )
 
@@ -187,7 +101,9 @@ function Rendered({ line }: { line: Line }) {
           <Tex tex={line.tex} className="calc" />
           {line.tolerance && (
             <div className="tolerance">
-              <span className="sigma">{line.tolerance.text}</span>
+              <span className="sigma">
+                <Quantity text={line.tolerance.text} />
+              </span>
               {line.tolerance.contributions.length > 1 && (
                 <span className="shares">
                   {line.tolerance.contributions
@@ -203,6 +119,36 @@ function Rendered({ line }: { line: Line }) {
   }
 }
 
+/**
+ * Table cells and tolerances are plain text, so "1.250e7 mm^3" would print
+ * exactly like that. Render it the way it is written: 1.250·10⁷ mm³, with a
+ * real micro sign. A leading "± " is passed through untouched.
+ */
+function Quantity({ text }: { text: string }) {
+  const match = text.match(/^(±\s*)?(-?[\d.]+)(?:e([+-]?\d+))?\s*(.*)$/)
+  if (!match) return <>{text}</>
+
+  const [, prefix, mantissa, rawExponent, rawUnit] = match
+  const exponent = rawExponent?.replace(/^\+/, '')
+  const unit = rawUnit.replace(/\bu(?=[A-Za-zΩ])/g, '\u00b5')
+
+  return (
+    <>
+      {prefix}
+      {mantissa}
+      {exponent && (
+        <>
+          ·10<sup>{exponent}</sup>
+        </>
+      )}
+      {unit && ' '}
+      {unit.split(/(\^-?\d+)/).map((part, index) =>
+        part.startsWith('^') ? <sup key={index}>{part.slice(1)}</sup> : part,
+      )}
+    </>
+  )
+}
+
 function Tex({ tex, className }: { tex: string; className: string }) {
   const html = useMemo(
     () => katex.renderToString(tex, { displayMode: true, throwOnError: false }),
@@ -211,47 +157,72 @@ function Tex({ tex, className }: { tex: string; className: string }) {
   return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-export default function App() {
-  const [store, setStore] = useState<Store>(loadStore)
-  const [panel, setPanel] = useState<'none' | 'meta' | 'settings'>('none')
-  const backupInput = useRef<HTMLInputElement>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(store))
-    } catch {
-      /* blocked storage - the session still works, it just will not persist */
-    }
-  }, [store])
-
-  useEffect(() => {
-    const root = document.documentElement
-    if (store.settings.theme === 'system') root.removeAttribute('data-theme')
-    else root.setAttribute('data-theme', store.settings.theme)
-  }, [store.settings.theme])
-
-  const active = store.sheets.find((sheet) => sheet.id === store.activeId) ?? store.sheets[0]
-
-  const libraries = useMemo(() => {
-    const map: Record<string, string> = {}
-    for (const sheet of store.sheets) {
-      if (sheet.id !== active.id) map[sheet.name] = sheet.source
-    }
-    return map
-  }, [store.sheets, active.id])
-
-  const lines = useMemo(
-    () =>
-      evaluateSheet(active.source, {
-        precision: store.precision,
-        mode: store.mode,
-        libraries,
-      }),
-    [active.source, store.precision, store.mode, libraries],
+function TitleBlock({
+  project,
+  title,
+  position,
+}: {
+  project: Project
+  title: string
+  position?: string
+}) {
+  return (
+    <div className="title-block">
+      <div className="title-block-main">
+        <strong>{title}</strong>
+        <span>
+          {project.name}
+          {project.meta.client && ` · ${project.meta.client}`}
+        </span>
+      </div>
+      <dl>
+        {project.meta.author && (
+          <>
+            <dt>Author</dt>
+            <dd>{project.meta.author}</dd>
+          </>
+        )}
+        {project.meta.checkedBy && (
+          <>
+            <dt>Checked</dt>
+            <dd>{project.meta.checkedBy}</dd>
+          </>
+        )}
+        <dt>Rev</dt>
+        <dd>{project.meta.revision || '-'}</dd>
+        <dt>Date</dt>
+        <dd>{new Date().toLocaleDateString('sv-SE')}</dd>
+        {position && (
+          <>
+            <dt>Sheet</dt>
+            <dd>{position}</dd>
+          </>
+        )}
+      </dl>
+    </div>
   )
+}
 
-  const title = useMemo(() => sheetTitle(active.source), [active.source])
+function SheetDocument({
+  sheet,
+  project,
+  precision,
+  mode,
+  libraries,
+  position,
+}: {
+  sheet: Sheet
+  project: Project
+  precision: number
+  mode: ToleranceMode
+  libraries: Record<string, string>
+  position?: string
+}) {
+  const lines = useMemo(
+    () => evaluateSheet(sheet.source, { precision, mode, libraries }),
+    [sheet.source, precision, mode, libraries],
+  )
+  const title = useMemo(() => sheetTitle(sheet.source), [sheet.source])
 
   // The title block already shows the sheet's title, so the heading it came
   // from would print it a second time. Skip that one line only.
@@ -260,32 +231,104 @@ export default function App() {
     [lines, title],
   )
 
-  const update = (patch: Partial<Sheet>) =>
+  return (
+    <div className="sheet-page">
+      <TitleBlock project={project} title={title} position={position} />
+      {lines.map((line, index) =>
+        index === titleLine ? null : <Rendered key={index} line={line} />,
+      )}
+    </div>
+  )
+}
+
+export default function App() {
+  const [store, setStore] = useState<Store>(loadStore)
+  const [panel, setPanel] = useState<'none' | 'meta' | 'settings'>('none')
+  const [printingProject, setPrintingProject] = useState(false)
+  const [saveFailure, setSaveFailure] = useState<'quota' | 'blocked' | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState<'sheet' | 'project' | null>(null)
+  const backupInput = useRef<HTMLInputElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const result = saveStore(store)
+    setSaveFailure(result.ok ? null : result.reason)
+  }, [store])
+
+  // A half-finished confirmation should not linger.
+  useEffect(() => {
+    if (!confirmingDelete) return
+    const timer = setTimeout(() => setConfirmingDelete(null), 4000)
+    return () => clearTimeout(timer)
+  }, [confirmingDelete])
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (store.settings.theme === 'system') root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', store.settings.theme)
+  }, [store.settings.theme])
+
+  const project = activeProject(store)
+  const sheet = activeSheet(store)
+
+  // Every other sheet in the project is importable by name.
+  const libraries = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const other of project.sheets) {
+      if (other.id !== sheet.id) map[other.name] = other.source
+    }
+    return map
+  }, [project.sheets, sheet.id])
+
+  const patchProject = (patch: Partial<Project>) =>
     setStore((current) => ({
       ...current,
-      sheets: current.sheets.map((sheet) =>
-        sheet.id === active.id ? { ...sheet, ...patch } : sheet,
+      projects: current.projects.map((candidate) =>
+        candidate.id === project.id ? { ...candidate, ...patch } : candidate,
       ),
     }))
+
+  const patchSheet = (patch: Partial<Sheet>) =>
+    patchProject({
+      sheets: project.sheets.map((candidate) =>
+        candidate.id === sheet.id ? { ...candidate, ...patch } : candidate,
+      ),
+    })
+
+  const setMeta = (patch: Partial<ProjectMeta>) =>
+    patchProject({ meta: { ...project.meta, ...patch } })
+
+  const setSettings = (patch: Partial<Settings>) =>
+    setStore((current) => ({ ...current, settings: { ...current.settings, ...patch } }))
+
+  const addProject = () => {
+    const created = newProject(`Project ${store.projects.length + 1}`, {
+      author: store.settings.author,
+    })
+    setStore((current) => ({
+      ...current,
+      projects: [...current.projects, created],
+      activeProjectId: created.id,
+      activeSheetId: created.sheets[0].id,
+    }))
+  }
 
   const addSheet = () => {
     const id = newId()
     setStore((current) => ({
       ...current,
-      activeId: id,
-      sheets: [
-        ...current.sheets,
-        {
-          id,
-          name: `Sheet ${current.sheets.length + 1}`,
-          source: '# New calculation\n\n',
-          meta: {
-            ...emptyMeta(),
-            author: current.settings.author,
-            project: current.settings.project,
-          },
-        },
-      ],
+      activeSheetId: id,
+      projects: current.projects.map((candidate) =>
+        candidate.id === project.id
+          ? {
+              ...candidate,
+              sheets: [
+                ...candidate.sheets,
+                { id, name: `Sheet ${candidate.sheets.length + 1}`, source: '# New calculation\n\n' },
+              ],
+            }
+          : candidate,
+      ),
     }))
   }
 
@@ -293,50 +336,85 @@ export default function App() {
     const id = newId()
     setStore((current) => ({
       ...current,
-      activeId: id,
-      sheets: [...current.sheets, { ...active, id, name: `${active.name} copy` }],
+      activeSheetId: id,
+      projects: current.projects.map((candidate) =>
+        candidate.id === project.id
+          ? {
+              ...candidate,
+              sheets: [...candidate.sheets, { ...sheet, id, name: `${sheet.name} copy` }],
+            }
+          : candidate,
+      ),
     }))
   }
 
   const deleteSheet = () => {
-    if (store.sheets.length === 1) return
+    if (project.sheets.length === 1) return
+    if (confirmingDelete !== 'sheet') {
+      setConfirmingDelete('sheet')
+      return
+    }
+    setConfirmingDelete(null)
+    const remaining = project.sheets.filter((candidate) => candidate.id !== sheet.id)
+    setStore((current) => ({
+      ...current,
+      activeSheetId: remaining[0].id,
+      projects: current.projects.map((candidate) =>
+        candidate.id === project.id ? { ...candidate, sheets: remaining } : candidate,
+      ),
+    }))
+  }
+
+  const deleteProject = () => {
+    if (store.projects.length === 1) return
+    if (confirmingDelete !== 'project') {
+      setConfirmingDelete('project')
+      return
+    }
+    setConfirmingDelete(null)
     setStore((current) => {
-      const remaining = current.sheets.filter((sheet) => sheet.id !== active.id)
-      return { ...current, sheets: remaining, activeId: remaining[0].id }
+      const remaining = current.projects.filter((candidate) => candidate.id !== project.id)
+      return {
+        ...current,
+        projects: remaining,
+        activeProjectId: remaining[0].id,
+        activeSheetId: remaining[0].sheets[0].id,
+      }
     })
   }
 
-  const save = () => {
-    const url = URL.createObjectURL(new Blob([active.source], { type: 'text/plain' }))
+  const reorder = (offset: number) => setStore((current) => moveSheet(current, sheet.id, offset))
+
+  const moveToProject = (targetId: string) =>
+    setStore((current) => moveSheetToProject(current, sheet.id, targetId))
+
+  const download = (contents: string, filename: string, type: string) => {
+    const url = URL.createObjectURL(new Blob([contents], { type }))
     const link = document.createElement('a')
     link.href = url
-    link.download = `${slug(title)}.calc`
+    link.download = filename
     link.click()
     URL.revokeObjectURL(url)
   }
 
-  const setSettings = (patch: Partial<Settings>) =>
-    setStore((current) => ({ ...current, settings: { ...current.settings, ...patch } }))
+  const save = () => download(sheet.source, `${slug(sheet.name)}.calc`, 'text/plain')
 
   const exportAll = () => {
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' }),
+    const stamped = { ...store, lastBackupAt: Date.now() }
+    download(
+      JSON.stringify(stamped, null, 2),
+      `longhand-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json',
     )
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'longhand-backup.json'
-    link.click()
-    URL.revokeObjectURL(url)
+    setStore(stamped)
   }
 
   const importAll = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
       try {
-        const parsed = JSON.parse(await file.text()) as Store
-        if (parsed.sheets?.length) {
-          setStore({ ...parsed, settings: { ...defaultSettings(), ...parsed.settings } })
-        }
+        const { migrate } = await import('./store')
+        setStore(migrate(JSON.parse(await file.text())))
       } catch {
         /* not a backup file - leave everything as it is */
       }
@@ -351,41 +429,143 @@ export default function App() {
       const id = newId()
       setStore((current) => ({
         ...current,
-        activeId: id,
-        sheets: [
-          ...current.sheets,
-          { id, name: file.name.replace(/\.[^.]+$/, ''), source, meta: emptyMeta() },
-        ],
+        activeSheetId: id,
+        projects: current.projects.map((candidate) =>
+          candidate.id === project.id
+            ? {
+                ...candidate,
+                sheets: [
+                  ...candidate.sheets,
+                  { id, name: file.name.replace(/\.[^.]+$/, ''), source },
+                ],
+              }
+            : candidate,
+        ),
       }))
     }
     event.target.value = ''
   }
 
+  /**
+   * A 600-line sheet takes about 700ms to re-evaluate when the edit is on the
+   * first line, because every line below it has to be redone. Evaluating the
+   * deferred source keeps typing at full speed: React renders the keystroke
+   * immediately and recomputes the results in a pass it is allowed to abandon
+   * when the next key arrives. The results shown are then briefly one keystroke
+   * behind, which `stale` says out loud instead of pretending otherwise.
+   */
+  const deferredSource = useDeferredValue(sheet.source)
+  const stale = deferredSource !== sheet.source
+  const lines = useMemo(
+    () =>
+      evaluateSheet(deferredSource, {
+        precision: store.precision,
+        mode: store.mode,
+        libraries,
+      }),
+    [deferredSource, store.precision, store.mode, libraries],
+  )
+
+  /**
+   * Show the whole package as one document and let the user look at it before
+   * printing. An explicit mode beats printing straight away: they get to check
+   * the order and the title blocks, and there is no timing to get wrong.
+   */
+  const showPackage = () => {
+    setPrintingProject(true)
+    setPanel('none')
+  }
+
+  const duplicates = duplicateNames(project)
+  const backupAge = backupAgeDays(store)
+
   return (
     <div className="app">
+      {saveFailure && (
+        <div className="save-alert no-print">
+          <strong>Not saving.</strong>{' '}
+          {saveFailure === 'quota'
+            ? 'This browser has run out of storage for Longhand. Export a backup now, then delete a project you no longer need.'
+            : 'This browser is blocking storage, so nothing you type is being kept. Export a backup before you close the tab.'}
+          <button onClick={exportAll}>Export backup</button>
+        </div>
+      )}
+
       <aside className="sheets">
         <div className="sheets-head">
           <span className="brand">Longhand</span>
-          <button className="icon" onClick={addSheet} title="New sheet">
+          <button className="icon" onClick={addProject} title="New project">
             +
           </button>
         </div>
-        <ul>
-          {store.sheets.map((sheet) => (
-            <li key={sheet.id}>
-              <button
-                className={sheet.id === active.id ? 'sheet current' : 'sheet'}
-                onClick={() => setStore((current) => ({ ...current, activeId: sheet.id }))}
-              >
-                {sheet.name}
-              </button>
-            </li>
-          ))}
-        </ul>
+
+        <div className="tree">
+          {store.projects.map((candidate) => {
+            const current = candidate.id === project.id
+            return (
+              <div key={candidate.id} className="project">
+                <button
+                  className={current ? 'project-name current' : 'project-name'}
+                  onClick={() =>
+                    setStore((state) => ({
+                      ...state,
+                      activeProjectId: candidate.id,
+                      activeSheetId: candidate.sheets[0].id,
+                    }))
+                  }
+                >
+                  {candidate.name}
+                </button>
+                {current && (
+                  <ul>
+                    {candidate.sheets.map((candidateSheet) => (
+                      <li key={candidateSheet.id}>
+                        <button
+                          className={candidateSheet.id === sheet.id ? 'sheet current' : 'sheet'}
+                          onClick={() =>
+                            setStore((state) => ({ ...state, activeSheetId: candidateSheet.id }))
+                          }
+                        >
+                          {candidateSheet.name}
+                        </button>
+                      </li>
+                    ))}
+                    <li>
+                      <button className="sheet add" onClick={addSheet}>
+                        + Sheet
+                      </button>
+                    </li>
+                  </ul>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
         <div className="sheets-foot">
+          <button
+            onClick={() => reorder(-1)}
+            disabled={project.sheets.findIndex((s) => s.id === sheet.id) === 0}
+            title="Move sheet up"
+          >
+            ↑
+          </button>
+          <button
+            onClick={() => reorder(1)}
+            disabled={
+              project.sheets.findIndex((s) => s.id === sheet.id) === project.sheets.length - 1
+            }
+            title="Move sheet down"
+          >
+            ↓
+          </button>
           <button onClick={duplicateSheet}>Duplicate</button>
-          <button onClick={deleteSheet} disabled={store.sheets.length === 1}>
-            Delete
+          <button
+            className={confirmingDelete === 'sheet' ? 'danger' : ''}
+            onClick={deleteSheet}
+            disabled={project.sheets.length === 1}
+          >
+            {confirmingDelete === 'sheet' ? 'Really?' : 'Delete'}
           </button>
         </div>
       </aside>
@@ -394,8 +574,8 @@ export default function App() {
         <div className="toolbar">
           <input
             className="sheet-name"
-            value={active.name}
-            onChange={(event) => update({ name: event.target.value })}
+            value={sheet.name}
+            onChange={(event) => patchSheet({ name: event.target.value })}
             aria-label="Sheet name"
           />
           <div className="toolbar-actions">
@@ -403,7 +583,7 @@ export default function App() {
               className={panel === 'meta' ? 'on' : ''}
               onClick={() => setPanel((current) => (current === 'meta' ? 'none' : 'meta'))}
             >
-              Title block
+              Project
             </button>
             <button
               className={panel === 'settings' ? 'on' : ''}
@@ -419,27 +599,98 @@ export default function App() {
         </div>
 
         {panel === 'meta' && (
-          <div className="panel meta-editor">
+          <div className="panel">
             <section>
-              <h3>Title block</h3>
-              {(
-                [
-                  ['project', 'Project'],
-                  ['author', 'Author'],
-                  ['revision', 'Revision'],
-                  ['checkedBy', 'Checked by'],
-                ] as [keyof Meta, string][]
-              ).map(([field, caption]) => (
-                <label key={field}>
-                  <span>{caption}</span>
-                  <input
-                    value={active.meta[field]}
-                    onChange={(event) =>
-                      update({ meta: { ...active.meta, [field]: event.target.value } })
-                    }
-                  />
+              <h3>Project</h3>
+              <label>
+                <span>Name</span>
+                <input
+                  value={project.name}
+                  onChange={(event) => patchProject({ name: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Client</span>
+                <input
+                  value={project.meta.client}
+                  onChange={(event) => setMeta({ client: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Author</span>
+                <input
+                  value={project.meta.author}
+                  onChange={(event) => setMeta({ author: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Checked by</span>
+                <input
+                  value={project.meta.checkedBy}
+                  onChange={(event) => setMeta({ checkedBy: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>Revision</span>
+                <input
+                  value={project.meta.revision}
+                  onChange={(event) => setMeta({ revision: event.target.value })}
+                />
+              </label>
+              <p className="hint">
+                Every sheet in this project shares this title block.
+              </p>
+            </section>
+
+            <section>
+              <h3>Sheets</h3>
+              <p className="hint">
+                Sheets print in the order shown in the sidebar — use ↑ and ↓ to change it.
+              </p>
+              {duplicates.length > 0 && (
+                <p className="warning">
+                  Two sheets are called {duplicates.map((name) => `"${name}"`).join(', ')}. An{' '}
+                  <code>import</code> resolves by name, so only the first would be found — rename one.
+                </p>
+              )}
+              {store.projects.length > 1 && (
+                <label>
+                  <span>Move this sheet to</span>
+                  <select
+                    value=""
+                    onChange={(event) => event.target.value && moveToProject(event.target.value)}
+                    disabled={project.sheets.length === 1}
+                  >
+                    <option value="">Choose a project…</option>
+                    {store.projects
+                      .filter((candidate) => candidate.id !== project.id)
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                        </option>
+                      ))}
+                  </select>
                 </label>
-              ))}
+              )}
+            </section>
+
+            <section>
+              <h3>Package</h3>
+              <p className="hint">
+                {project.sheets.length} sheet{project.sheets.length === 1 ? '' : 's'} in this project.
+              </p>
+              <div className="settings-buttons">
+                <button onClick={showPackage}>Preview whole project</button>
+                <button
+                  className={confirmingDelete === 'project' ? 'danger' : ''}
+                  onClick={deleteProject}
+                  disabled={store.projects.length === 1}
+                >
+                  {confirmingDelete === 'project'
+                    ? `Really delete ${project.sheets.length} sheet${project.sheets.length === 1 ? '' : 's'}?`
+                    : 'Delete project'}
+                </button>
+              </div>
             </section>
           </div>
         )}
@@ -504,19 +755,19 @@ export default function App() {
                   onChange={(event) => setSettings({ author: event.target.value })}
                 />
               </label>
-              <label>
-                <span>Default project</span>
-                <input
-                  value={store.settings.project}
-                  onChange={(event) => setSettings({ project: event.target.value })}
-                />
-              </label>
-              <p className="hint">Fills in the title block of new sheets.</p>
+              <p className="hint">Fills in the title block of new projects.</p>
             </section>
 
             <section>
               <h3>Data</h3>
-              <p className="hint">Everything is stored in this browser only.</p>
+              <p className="hint">
+                Everything is stored in this browser only.{' '}
+                {backupAge === null
+                  ? 'No backup has ever been exported.'
+                  : backupAge === 0
+                    ? 'Last backup: today.'
+                    : `Last backup: ${backupAge} day${backupAge === 1 ? '' : 's'} ago.`}
+              </p>
               <div className="settings-buttons">
                 <button onClick={exportAll}>Export backup</button>
                 <button onClick={() => backupInput.current?.click()}>Restore backup</button>
@@ -534,42 +785,54 @@ export default function App() {
         )}
 
         <Editor
-          value={active.source}
+          value={sheet.source}
           results={lines}
-          onChange={(source) => update({ source })}
+          onChange={(source) => patchSheet({ source })}
         />
       </div>
 
-      <div className="output-pane">
-        <div className="sheet-page">
-          <div className="title-block">
-            <div className="title-block-main">
-              <strong>{title}</strong>
-              {active.meta.project && <span>{active.meta.project}</span>}
+      <div
+        className={
+          (printingProject ? 'output-pane package' : 'output-pane') + (stale ? ' stale' : '')
+        }
+      >
+        {printingProject && (
+          <div className="package-bar no-print">
+            <span>
+              Package preview — {project.name}, {project.sheets.length} sheet
+              {project.sheets.length === 1 ? '' : 's'}
+            </span>
+            <div className="package-bar-actions">
+              <button onClick={() => window.print()}>Print package</button>
+              <button onClick={() => setPrintingProject(false)}>Close</button>
             </div>
-            <dl>
-              {active.meta.author && (
-                <>
-                  <dt>Author</dt>
-                  <dd>{active.meta.author}</dd>
-                </>
-              )}
-              {active.meta.checkedBy && (
-                <>
-                  <dt>Checked</dt>
-                  <dd>{active.meta.checkedBy}</dd>
-                </>
-              )}
-              <dt>Rev</dt>
-              <dd>{active.meta.revision || '-'}</dd>
-              <dt>Date</dt>
-              <dd>{new Date().toLocaleDateString('sv-SE')}</dd>
-            </dl>
           </div>
-          {lines.map((line, index) =>
-            index === titleLine ? null : <Rendered key={index} line={line} />,
-          )}
-        </div>
+        )}
+        {printingProject ? (
+          project.sheets.map((candidate, index) => (
+            <SheetDocument
+              key={candidate.id}
+              sheet={candidate}
+              project={project}
+              precision={store.precision}
+              mode={store.mode}
+              libraries={Object.fromEntries(
+                project.sheets
+                  .filter((other) => other.id !== candidate.id)
+                  .map((other) => [other.name, other.source]),
+              )}
+              position={`${index + 1} of ${project.sheets.length}`}
+            />
+          ))
+        ) : (
+          <SheetDocument
+            sheet={{ ...sheet, source: deferredSource }}
+            project={project}
+            precision={store.precision}
+            mode={store.mode}
+            libraries={libraries}
+          />
+        )}
       </div>
     </div>
   )

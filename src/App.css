@@ -92,6 +92,39 @@
   box-sizing: border-box;
 }
 
+.save-alert {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  font-size: 12px;
+  color: var(--error);
+  background: var(--error-bg);
+  border-bottom: 1px solid var(--error);
+}
+
+.save-alert strong {
+  font-weight: 600;
+}
+
+.save-alert button {
+  margin-left: auto;
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--error);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
 html,
 body,
 #root {
@@ -132,12 +165,48 @@ body {
   font-weight: 600;
 }
 
-.sheets ul {
+.tree {
   flex: 1;
-  margin: 0;
   padding: 0 8px;
-  list-style: none;
   overflow-y: auto;
+}
+
+.project {
+  margin-bottom: 4px;
+}
+
+.project-name {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-name:hover {
+  background: var(--hover);
+}
+
+.project-name.current {
+  color: var(--ink);
+}
+
+.sheets ul {
+  margin: 1px 0 6px;
+  padding: 0 0 0 10px;
+  list-style: none;
+  border-left: 1px solid var(--rule);
 }
 
 .sheet {
@@ -168,8 +237,13 @@ body {
   background: var(--paper);
 }
 
+.sheet.add {
+  color: var(--faint);
+}
+
 .sheets-foot {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 10px;
   border-top: 1px solid var(--rule);
@@ -196,7 +270,20 @@ body {
 }
 
 .sheets-foot button {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 4px;
+}
+
+/* The arrows need no more room than an arrow; "Really delete 3 sheets?" does,
+   and wraps onto its own line rather than being cut off by the sidebar. */
+.sheets-foot button[title^='Move sheet'] {
+  flex: 0 0 auto;
+}
+
+.sheets-foot button.danger {
+  color: var(--error);
+  background: var(--error-bg);
 }
 
 .sheets-foot button:disabled {
@@ -358,6 +445,12 @@ body {
   background: var(--hover);
 }
 
+.settings-buttons button.danger {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--error);
+}
+
 .editor {
   flex: 1;
   min-width: 0;
@@ -380,9 +473,54 @@ body {
   background: var(--paper);
 }
 
+/* One keystroke behind while a long sheet catches up. Quiet, not a spinner. */
+.output-pane.stale {
+  opacity: 0.55;
+  transition: opacity 120ms linear 90ms;
+}
+
+.package-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 18px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--shade);
+  border-bottom: 1px solid var(--rule);
+}
+
+.package-bar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.package-bar button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.package-bar button:hover {
+  border-color: var(--rule-strong);
+}
+
 .sheet-page {
   max-width: 760px;
   padding: 28px 48px 96px;
+}
+
+.package .sheet-page + .sheet-page {
+  border-top: 1px solid var(--rule);
 }
 
 .title-block {
@@ -511,6 +649,15 @@ body {
   color: var(--faint);
 }
 
+.panel .warning {
+  margin: 0;
+}
+
+.panel .warning code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+}
+
 .warning {
   margin: 0 0 8px 1.5em;
   padding: 3px 9px;
@@ -594,6 +741,11 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-bottom: 1.5px solid var(--ink);
+}
+
+.sheet-table sup {
+  font-size: 0.7em;
+  line-height: 0;
 }
 
 .sheet-table td.pass {
@@ -702,7 +854,8 @@ body {
   }
 
   .sheets,
-  .editor-pane {
+  .editor-pane,
+  .no-print {
     display: none;
   }
 
@@ -713,6 +866,11 @@ body {
   .sheet-page {
     max-width: none;
     padding: 0;
+  }
+
+  /* Each sheet of a printed package starts on its own page. */
+  .package .sheet-page + .sheet-page {
+    break-before: page;
   }
 
   .title-block {
@@ -750,27 +908,24 @@ body {
 @media (max-width: 900px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto 45vh 1fr;
+    grid-template-rows: auto 40vh 1fr;
   }
 
   .sheets {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
     border-right: 0;
     border-bottom: 1px solid var(--rule);
-    padding-right: 10px;
   }
 
-  .sheets ul {
-    display: flex;
-    gap: 6px;
-    padding: 8px;
-    overflow-x: auto;
+  /* The sidebar keeps its shape on a phone and only gets shorter. Laying it on
+     its side clipped the names to "B..." and "T...", which tells you nothing
+     about which sheet you are on. */
+  .tree {
+    max-height: 27vh;
   }
 
   .sheets-foot {
-    border-top: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
   }
 
   .editor-pane {

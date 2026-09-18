@@ -120,12 +120,28 @@ export function formatLike(value: unknown, reference: unknown, precision: number
   const target = displayUnit(reference)
   if (target && isUnitValue(value)) {
     try {
-      return `${formatNumber((value as any).toNumber(target), precision)} ${target}`
+      const number = (value as any).toNumber(target)
+      // Match the reference's notation as well as its unit: beside a section
+      // modulus printed as 1.25e7 mm^3, a tolerance of 171600 mm^3 is hard to
+      // compare at a glance, where 1.716e5 mm^3 is not.
+      const exponential = formatReference(reference, target, precision).includes('e')
+      const text = exponential
+        ? math.format(number, { notation: 'exponential', precision } as any).replace(/e\+?/, 'e')
+        : formatNumber(number, precision)
+      return `${text} ${target}`
     } catch {
       /* fall through */
     }
   }
   return formatValue(value, precision)
+}
+
+const formatReference = (reference: unknown, target: string, precision: number): string => {
+  try {
+    return formatNumber((reference as any).toNumber(target), precision)
+  } catch {
+    return formatValue(reference, precision)
+  }
 }
 
 /**
@@ -170,4 +186,48 @@ export function unitNames(): string[] {
     known = []
   }
   return [...new Set([...ENGINEERING, ...known])].sort()
+}
+
+/**
+ * Format a whole table column consistently.
+ *
+ * Formatting each cell on its own gives a column reading 1.25e7 next to
+ * 8440000 — the same rule applied to different magnitudes, which looks like a
+ * bug to a reader. So the column picks one unit and one notation for all of
+ * its cells, from the range of values it actually holds.
+ */
+export function formatColumn(values: unknown[], precision: number): string[] {
+  const unit = values.map(displayUnit).find((candidate) => candidate !== null) ?? null
+
+  const numbers = values.map((value) => {
+    try {
+      return toNumberIn(value, unit)
+    } catch {
+      return NaN
+    }
+  })
+
+  const magnitudes = numbers.filter((n) => Number.isFinite(n) && n !== 0).map(Math.abs)
+  const largest = magnitudes.length ? Math.max(...magnitudes) : 0
+  const smallest = magnitudes.length ? Math.min(...magnitudes) : 0
+  const exponential = largest >= 1e5 || (smallest > 0 && smallest < 1e-3)
+
+  // One decimal count for the whole column, taken from its largest value, so
+  // the decimal points line up: 20.00 / 29.63 / 61.22, never 20 / 29.63 / 61.224.
+  // Whole numbers stay whole: nobody writes a 300 mm beam width as 300.0 mm.
+  const allIntegers = numbers.every((n) => !Number.isFinite(n) || Number.isInteger(n))
+  const decimals = allIntegers
+    ? 0
+    : largest > 0
+      ? Math.max(0, precision - 1 - Math.floor(Math.log10(largest)))
+      : precision - 1
+
+  return values.map((value, index) => {
+    const n = numbers[index]
+    if (!Number.isFinite(n)) return formatValue(value, precision)
+    const text = exponential
+      ? math.format(n, { notation: 'exponential', precision } as any).replace(/e\+?/, 'e')
+      : n.toFixed(Math.min(decimals, 10))
+    return unit ? `${text} ${unit}` : text
+  })
 }
