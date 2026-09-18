@@ -10,17 +10,22 @@ body {
   background: var(--paper);
 }
 
+/**
+ * A fixed frame, like the app: the header and the index stay put and only the
+ * text column scrolls. Two hairlines say where that boundary is — under the
+ * header, and between the index and the text.
+ */
 .docs {
-  min-height: 100vh;
-  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 /* ------------------------------------------------------------------ header */
 
 .docs-head {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
 }
@@ -67,14 +72,23 @@ body {
 
 .docs-body {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 48px;
-  align-items: start;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+/* The index scrolls only if it is ever taller than the window. */
+.docs-nav {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 26px;
+  border-right: 1px solid var(--rule);
 }
 
 .docs-nav-inner {
-  position: sticky;
-  top: 76px;
   padding: 28px 0;
 }
 
@@ -124,9 +138,18 @@ body {
   background: var(--hover);
 }
 
+.docs-nav a.current {
+  color: var(--ink);
+  font-weight: 500;
+  background: var(--shade);
+}
+
 .docs-main {
-  padding: 28px 0 80px;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 28px 0 80px 34px;
 }
 
 /* --------------------------------------------------------------- the words */
@@ -170,7 +193,7 @@ kbd {
 
 .section {
   margin-top: 46px;
-  scroll-margin-top: 70px;
+  scroll-margin-top: 14px;
 }
 
 .section h2 {
@@ -206,7 +229,7 @@ kbd {
 
 .entry {
   margin-top: 26px;
-  scroll-margin-top: 70px;
+  scroll-margin-top: 14px;
 }
 
 .entry h3 {
@@ -320,18 +343,46 @@ kbd {
 /* ------------------------------------------------------------------- phone */
 
 @media (max-width: 820px) {
+  /* Too little room to pin anything: the whole page scrolls as one document. */
+  .docs {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .docs-head {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
   .docs-head-inner,
   .docs-body {
     padding: 0 16px;
   }
 
   .docs-body {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
+    display: block;
+    overflow: visible;
+  }
+
+  .docs-nav {
+    overflow: visible;
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .docs-main {
+    overflow: visible;
+    padding-left: 0;
+  }
+
+  .section,
+  .entry {
+    scroll-margin-top: 66px;
   }
 
   .docs-nav-inner {
-    position: static;
     padding: 20px 0 0;
   }
 

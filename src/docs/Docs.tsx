@@ -72,11 +72,51 @@ function SectionBlock({ section }: { section: Section }) {
 export default function Docs() {
   const [query, setQuery] = useState('')
   const box = useRef<HTMLInputElement>(null)
+  const main = useRef<HTMLElement>(null)
+  const [current, setCurrent] = useState(REFERENCE[0].id)
   const sections = useMemo(() => filterSections(query), [query])
   const hits = useMemo(
     () => sections.reduce((count, section) => count + (section.entries?.length ?? 0), 0),
     [sections],
   )
+
+  /**
+   * The index is always on screen, so it may as well say where you are: the
+   * section whose heading has last passed the top of the text column. Read
+   * from the scroll position rather than an observer, because that answer is
+   * the same whether you scrolled, clicked an anchor or arrived on one.
+   */
+  useEffect(() => {
+    const pane = main.current
+    if (!pane) return
+
+    let queued = false
+    const update = () => {
+      queued = false
+      const marks = [...pane.querySelectorAll<HTMLElement>('.section[id]')]
+      // A little below the top edge, so a section that an anchor has just
+      // landed on — which sits at its scroll-margin — counts as the one you
+      // are reading rather than the one above it.
+      const top = pane.getBoundingClientRect().top + 28
+      const passed = marks.filter((mark) => mark.getBoundingClientRect().top <= top)
+      const here = passed.at(-1) ?? marks[0]
+      if (here) setCurrent(here.id)
+    }
+
+    const onScroll = () => {
+      if (queued) return
+      queued = true
+      requestAnimationFrame(update)
+    }
+
+    update()
+    pane.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      pane.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [query])
 
   // "/" to search is the convention on a documentation page; Escape leaves it.
   useEffect(() => {
@@ -126,20 +166,23 @@ export default function Docs() {
               </p>
             ) : (
               <ul>
-                {REFERENCE.map((section) => (
+                {[...REFERENCE, { id: 'examples', title: 'Worked examples' }].map((section) => (
                   <li key={section.id}>
-                    <a href={`#${section.id}`}>{section.title}</a>
+                    <a
+                      className={current === section.id ? 'current' : undefined}
+                      href={`#${section.id}`}
+                      aria-current={current === section.id ? 'true' : undefined}
+                    >
+                      {section.title}
+                    </a>
                   </li>
                 ))}
-                <li>
-                  <a href="#examples">Worked examples</a>
-                </li>
               </ul>
             )}
           </div>
         </aside>
 
-        <main className="docs-main">
+        <main className="docs-main" ref={main}>
           {!query && (
             <div className="intro">
               <h1>Reference</h1>

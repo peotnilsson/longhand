@@ -573,6 +573,39 @@ await seedWith(seed)
   check('and it is really there', pdf.status() === 200 && (await pdf.body()).length > 20000,
     `${pdf.status()}, ${(await pdf.body()).length} bytes`)
 
+  // the header is pinned, and the filled button in it is readable
+  {
+    const barTop = () => landing.$eval('.top', (e) => Math.round(e.getBoundingClientRect().top))
+    const before = await barTop()
+    await landing.evaluate(() => window.scrollTo(0, 2200))
+    await landing.waitForTimeout(350)
+    check('landing: the top bar stays at the top', before === 0 && (await barTop()) === 0,
+      `${before} -> ${await barTop()}`)
+    check('landing: and nothing scrolls over it',
+      await landing.$eval('.top nav a.cta', (e) => {
+        const box = e.getBoundingClientRect()
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+        return hit?.closest('a.cta') !== null
+      }))
+    await landing.evaluate(() => window.scrollTo(0, 0))
+
+    const contrast = await landing.$eval('.top nav a.cta', (element) => {
+      const parse = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number)
+      const luminance = ([r, g, b]) => {
+        const channel = (c) => {
+          c /= 255
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+        }
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+      }
+      const style = getComputedStyle(element)
+      const text = luminance(parse(style.color))
+      const behind = luminance(parse(style.backgroundColor))
+      return Math.round(((Math.max(text, behind) + 0.05) / (Math.min(text, behind) + 0.05)) * 10) / 10
+    })
+    check('landing: "Open the app" is readable on its button', contrast >= 4.5, `${contrast}:1`)
+  }
+
   const overflow = await landing.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   check('landing: no horizontal overflow', overflow === 0, `${overflow}px`)
@@ -635,13 +668,65 @@ await seedWith(seed)
   const examples = await docs.$$eval('a[href^="/app?example="]', (els) => els.length)
   check('the reference offers the worked examples', examples >= 4, `${examples} links`)
 
+  // the frame is pinned: only the text column scrolls
+  {
+    const pageScrolls = await docs.evaluate(() =>
+      document.documentElement.scrollHeight > document.documentElement.clientHeight + 1)
+    check('docs: the page itself does not scroll', !pageScrolls)
+
+    const top = (selector) => docs.$eval(selector, (e) => Math.round(e.getBoundingClientRect().top))
+    const before = [await top('.docs-head'), await top('.docs-nav'), await top('.search')]
+    const scrolled = await docs.evaluate(() => {
+      const main = document.querySelector('.docs-main')
+      main.scrollTop = 1400
+      return main.scrollTop
+    })
+    await docs.waitForTimeout(350)
+    const after = [await top('.docs-head'), await top('.docs-nav'), await top('.search')]
+    check('docs: the text column scrolls', scrolled > 1000, `scrollTop ${scrolled}`)
+    check('docs: header, index and search stay put', JSON.stringify(before) === JSON.stringify(after),
+      `${JSON.stringify(before)} -> ${JSON.stringify(after)}`)
+
+    await docs.click('.docs-nav a:has-text("Where your work is kept")')
+    await docs.waitForTimeout(450)
+    const landed = await docs.evaluate(() => {
+      const main = document.querySelector('.docs-main')
+      const section = document.querySelector('#storage')
+      return {
+        offset: Math.round(section.getBoundingClientRect().top - main.getBoundingClientRect().top),
+        pageScrolled: window.scrollY,
+      }
+    })
+    check('docs: the index scrolls the text, not the page',
+      Math.abs(landed.offset) < 30 && landed.pageScrolled === 0, JSON.stringify(landed))
+    const marked = await docs.$$eval('.docs-nav a.current', (els) => els.map((e) => e.textContent))
+    check('docs: the index says where you are', marked.length === 1 &&
+      marked[0] === 'Where your work is kept', JSON.stringify(marked))
+
+    const lines = await docs.evaluate(() => ({
+      header: getComputedStyle(document.querySelector('.docs-head')).borderBottomWidth,
+      divider: getComputedStyle(document.querySelector('.docs-nav')).borderRightWidth,
+    }))
+    check('docs: two hairlines mark the frame',
+      lines.header === '1px' && lines.divider === '1px', JSON.stringify(lines))
+  }
+
   const overflow = await docs.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   check('docs: no horizontal overflow', overflow === 0, `${overflow}px`)
   await docs.setViewportSize({ width: 390, height: 780 })
-  await docs.waitForTimeout(300)
-  check('docs on a phone: no horizontal overflow',
-    (await docs.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0)
+  await docs.waitForTimeout(400)
+  const phone = await docs.evaluate(() => {
+    const main = document.querySelector('.docs-main')
+    return {
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      pageScrolls: document.documentElement.scrollHeight > document.documentElement.clientHeight + 1,
+      mainScrolls: main.scrollHeight > main.clientHeight + 1,
+    }
+  })
+  check('docs on a phone: no horizontal overflow', phone.overflow === 0, `${phone.overflow}px`)
+  check('docs on a phone: one ordinary scrolling document',
+    phone.pageScrolls && !phone.mainScrolls, JSON.stringify(phone))
   check('the reference threw nothing', problems.length === 0, problems.join(' | '))
   await docs.screenshot({ path: 'verify-docs.png' })
   await docs.close()
