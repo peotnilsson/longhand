@@ -12,6 +12,7 @@ import {
 import { symbolToTex, toTex, valueToTex, sameTex } from './tex'
 import { definitionIndex, parseSolve, solve, SolveError, type SolveSetup } from './solve'
 import { builtins } from './builtins'
+import { splitNote } from './source'
 import {
   collectSymbols,
   propagate,
@@ -44,9 +45,23 @@ export type Line =
   | { kind: 'heading'; text: string; level: number }
   | { kind: 'prose'; text: string }
   | { kind: 'note'; text: string }
-  | { kind: 'calc'; tex: string; summary: string; tolerance?: ToleranceView; warning?: string }
-  | { kind: 'definition'; tex: string; summary: string; warning?: string }
-  | { kind: 'check'; tex: string; pass: boolean; margin: string | null; summary: string }
+  | {
+      kind: 'calc'
+      tex: string
+      summary: string
+      tolerance?: ToleranceView
+      warning?: string
+      note?: string
+    }
+  | { kind: 'definition'; tex: string; summary: string; warning?: string; note?: string }
+  | {
+      kind: 'check'
+      tex: string
+      pass: boolean
+      margin: string | null
+      summary: string
+      note?: string
+    }
   | { kind: 'table'; headers: string[]; rows: TableCell[][]; summary: string }
   | { kind: 'plot'; data: PlotData; summary: string }
   | { kind: 'error'; source: string; message: string }
@@ -156,6 +171,10 @@ function evaluateStatement(
 ): Line {
   const { precision, mode } = options
 
+  // Optional trailing note:  b = 300 mm  // from drawing A-102
+  const { body: withoutNote, note } = splitNote(line)
+  line = withoutNote
+
   // Optional display unit:  sigma = M_Ed/W  -> MPa
   let body = line
   let displayUnit: string | null = null
@@ -190,6 +209,7 @@ function evaluateStatement(
         kind: 'definition',
         tex: toTex(node, context.scope),
         summary: `${functionName}() defined`,
+        note,
         warning: redefined
           ? `${functionName} was already defined above — this replaces it for the lines below.`
           : undefined,
@@ -237,6 +257,7 @@ function evaluateStatement(
         pass,
         margin,
         summary: margin ? `${verdict} — ${margin}` : verdict,
+        note,
       }
     }
 
@@ -304,6 +325,7 @@ function evaluateStatement(
       summary: tolerance ? `= ${shown} ${tolerance.text}` : `= ${shown}`,
       tolerance,
       warning,
+      note,
     }
   } catch (error) {
     return { kind: 'error', source: line, message: explain(error, defined) }
@@ -320,7 +342,7 @@ function evaluateStatement(
  * matched.
  */
 function evaluateSolve(
-  line: string,
+  rawLine: string,
   context: Context,
   options: Required<Pick<SheetOptions, 'precision' | 'mode'>>,
   defined: Set<string>,
@@ -328,6 +350,7 @@ function evaluateSolve(
   index: number,
   snapshots?: Context[],
 ): Line {
+  const { body: line, note } = splitNote(rawLine)
   const request = parseSolve(line)!
   const { precision } = options
 
@@ -371,6 +394,7 @@ function evaluateSolve(
         context.scope,
       )}`,
       summary: `= ${shown}`,
+      note,
     }
   } catch (error) {
     if (error instanceof SolveError) {
@@ -393,7 +417,13 @@ function substitute(
     const isFunctionName = parent && parent.isFunctionNode && path === 'fn'
     if (n.isSymbolNode && !isFunctionName) {
       const value = scope[n.name]
-      if (value !== undefined && typeof value !== 'function') {
+      // A named table's columns are data, not a quantity: substituting one
+      // prints the whole table into the middle of the line, which is how a
+      // one-line lookup became a page-wide matrix.
+      const isData =
+        Array.isArray(value) ||
+        (typeof value === 'object' && value !== null && (value as any).isUnit !== true)
+      if (value !== undefined && typeof value !== 'function' && !isData) {
         try {
           return math.parse(formatValue(value, precision))
         } catch {
@@ -667,15 +697,16 @@ function runLines(
     } else if (line.startsWith('//')) {
       result = { kind: 'prose', text: line.replace(/^\/\/\s*/, '') }
     } else if (/^import\b/.test(line)) {
-      result = evaluateImport(line, context, options, libraries, depth)
+      result = evaluateImport(splitNote(line).body, context, options, libraries, depth)
     } else if (/^plot\b/.test(line)) {
-      result = evaluatePlot(line, context, defined)
+      result = evaluatePlot(splitNote(line).body, context, defined)
     } else if (/^table\b/.test(line)) {
-      const named = line.match(/^table\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/)
+      const named = splitNote(line).body.match(/^table\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/)
       const block: string[] = []
       let cursor = index + 1
-      while (cursor < lines.length && lines[cursor].trim() !== 'end') {
-        if (lines[cursor].trim() !== '') block.push(lines[cursor])
+      while (cursor < lines.length && splitNote(lines[cursor].trim()).body !== 'end') {
+        const row = splitNote(lines[cursor]).body
+        if (row !== '') block.push(row)
         cursor += 1
       }
       result = evaluateTable(block, context, options.precision, defined, named?.[1])
@@ -687,7 +718,7 @@ function runLines(
       }
       index = cursor
       continue
-    } else if (parseSolve(line)) {
+    } else if (parseSolve(splitNote(line).body)) {
       result = evaluateSolve(line, context, options, defined, lines, index, snapshots)
     } else {
       result = evaluateStatement(line, context, options, defined)

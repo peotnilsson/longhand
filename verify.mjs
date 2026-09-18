@@ -57,7 +57,7 @@ await page.addInitScript(() => {
 
 const seedWith = async (store) => {
   await page.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), store)
-  await page.goto('http://localhost:4173/')
+  await page.goto('http://localhost:4173/app')
   await page.reload()
   await page.waitForSelector('.sheet-page')
   await page.waitForTimeout(250)
@@ -230,26 +230,13 @@ await page.waitForSelector('.panel')
   check('profile closes', !(await page.$('.panel')))
 }
 
-// 12. help
-await page.click('button:has-text("Help")')
-await page.waitForSelector('.panel.help')
+// 12. Help leaves for the reference rather than opening a panel
 {
-  const codes = await page.$$eval('.panel.help .syntax code', (els) => els.map((e) => e.textContent))
-  check('help lists the syntax', codes.includes('b = 300 mm +- 2 mm') && codes.length > 10,
-    `${codes.length} examples`)
-  const before = (await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store'))))
-    .projects[0].sheets.length
-  await page.click('button:has-text("New sheet from the example")')
-  await page.waitForTimeout(300)
-  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
-  check('the example becomes a real sheet', after.projects[0].sheets.length === before + 1 &&
-    after.projects[0].sheets.at(-1).name === 'Example',
-    `${after.projects[0].sheets.length} sheets`)
-  await page.waitForTimeout(300)
-  const rendered = await page.$eval('.output-pane', (e) => e.textContent)
-  check('the example evaluates without an error', rendered.includes('OK') && !rendered.includes('Error'),
-    rendered.slice(0, 60))
-  await page.click('button:has-text("Help")')
+  const help = await page.$('.toolbar-link')
+  check('Help is a link to the reference',
+    (await help?.getAttribute('href')) === '/docs' && (await help?.textContent())?.trim() === 'Help',
+    (await help?.getAttribute('href')) ?? 'no link')
+  check('and there is no help panel left behind', !(await page.$('.panel.help')))
 }
 
 // 13. the frame stays put: only the code and the document scroll
@@ -261,7 +248,8 @@ await page.waitForSelector('.panel.help')
     projects: [{ ...seed.projects[0], sheets: [{ id: 'l', name: 'Long', source: long.join('\n') }] }],
     activeSheetId: 'l',
   })
-  await page.click('button:has-text("Help")')
+  // an open panel is the case that used to push the editor off the screen
+  await page.click('button:has-text("Settings")')
   await page.waitForTimeout(400)
 
   const pageScrolls = await page.evaluate(() =>
@@ -305,10 +293,10 @@ await page.waitForSelector('.panel.help')
       background: getComputedStyle(e).backgroundColor,
     })))
   check('the open tab stays outlined with the mouse away',
-    lit.length === 1 && lit[0].text === 'Help' &&
+    lit.length === 1 && lit[0].text === 'Settings' &&
       lit[0].border !== 'rgba(0, 0, 0, 0)' && lit[0].background !== 'rgba(0, 0, 0, 0)',
     JSON.stringify(lit))
-  await page.click('button:has-text("Help")')
+  await page.click('button:has-text("Settings")')
   check('pressing it again puts it out', (await page.$$('.toolbar button.on')).length === 0)
 }
 
@@ -389,9 +377,16 @@ A_all = sum(steel.A)
 await seedWith(seed)
 {
   const state = async () => page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
+  const popup = page.waitForEvent('popup', { timeout: 4000 }).catch(() => null)
   await page.keyboard.press('Alt+h')
+  const reference = await popup
+  check('Alt+H opens the reference', !!reference && new URL(reference.url()).pathname === '/docs',
+    reference ? reference.url() : 'nothing opened')
+  await reference?.close()
+
+  await page.keyboard.press('Alt+p')
   await page.waitForTimeout(200)
-  check('Alt+H opens Help', !!(await page.$('.panel.help')))
+  check('Alt+P opens the project panel', !!(await page.$('.panel')))
   await page.keyboard.press('Escape')
   await page.waitForTimeout(200)
   check('Escape closes it', !(await page.$('.panel')))
@@ -540,7 +535,160 @@ await seedWith(seed)
   await page.click('button:has-text("Close")')
 }
 
-// 19. nothing clipped or overflowing, in either theme and at phone width
+// 19. the landing page
+{
+  const landing = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const problems = []
+  landing.on('pageerror', (error) => problems.push(String(error)))
+  const responses = new Map()
+  landing.on('response', (response) => responses.set(new URL(response.url()).pathname, response.status()))
+
+  await landing.goto('http://localhost:4173/')
+  await landing.waitForSelector('.hero h1')
+
+  check('the landing page is the front door', !(await landing.$('.app')),
+    (await landing.$eval('h1', (e) => e.textContent)).slice(0, 48))
+  check('it says what the thing is', /calculation sheet/i.test(await landing.$eval('h1', (e) => e.textContent)))
+
+  const images = await landing.$$eval('img', (els) =>
+    els.map((image) => ({ src: new URL(image.src).pathname, loaded: image.naturalWidth > 0 })))
+  check('every screenshot loads', images.length > 0 && images.every((image) => image.loaded),
+    JSON.stringify(images))
+
+  const links = await landing.$$eval('a[href]', (els) => els.map((a) => a.getAttribute('href')))
+  check('it links to the app, the reference and an example',
+    links.includes('/app') && links.includes('/docs') &&
+      links.some((href) => href.startsWith('/app?example=')),
+    JSON.stringify([...new Set(links)].slice(0, 8)))
+
+  const comparison = await landing.$$eval('.compare tbody tr th', (els) => els.map((e) => e.textContent))
+  check('the comparison names the alternatives', comparison.length >= 4, JSON.stringify(comparison))
+
+  const cards = await landing.$$('.card')
+  check('all four worked examples are offered', cards.length === 4, `${cards.length} cards`)
+
+  const sample = await landing.$('a[href="/sample-package.pdf"]')
+  check('the sample PDF is offered', !!sample)
+  const pdf = await landing.request.get('http://localhost:4173/sample-package.pdf')
+  check('and it is really there', pdf.status() === 200 && (await pdf.body()).length > 20000,
+    `${pdf.status()}, ${(await pdf.body()).length} bytes`)
+
+  const overflow = await landing.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check('landing: no horizontal overflow', overflow === 0, `${overflow}px`)
+
+  await landing.setViewportSize({ width: 390, height: 780 })
+  await landing.waitForTimeout(300)
+  const phoneOverflow = await landing.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check('landing on a phone: no horizontal overflow', phoneOverflow === 0, `${phoneOverflow}px`)
+  check('the landing page threw nothing', problems.length === 0, problems.join(' | '))
+  await landing.screenshot({ path: 'verify-landing.png', fullPage: true })
+  await landing.close()
+}
+
+// 20. the reference
+{
+  const docs = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const problems = []
+  docs.on('pageerror', (error) => problems.push(String(error)))
+  await docs.goto('http://localhost:4173/docs')
+  await docs.waitForSelector('.docs-main')
+
+  const entries = await docs.$$('.entry')
+  check('the reference lists every command', entries.length >= 25, `${entries.length} entries`)
+
+  const sections = await docs.$$eval('.section h2', (els) => els.map((e) => e.textContent))
+  check('and groups them', sections.length >= 6, JSON.stringify(sections))
+
+  // search
+  await docs.fill('.search', 'goal seek')
+  await docs.waitForTimeout(250)
+  const found = await docs.$$eval('.entry h3 code', (els) => els.map((e) => e.textContent))
+  check('searching by another name for it finds solve',
+    found.some((code) => code.includes('solve')), JSON.stringify(found))
+
+  await docs.fill('.search', 'zzzz')
+  await docs.waitForTimeout(250)
+  check('an empty search says so', !!(await docs.$('.nothing')))
+
+  await docs.fill('.search', '')
+  await docs.waitForTimeout(250)
+  check('clearing it brings everything back',
+    (await docs.$$('.entry')).length === entries.length)
+
+  // "/" focuses the box, Escape leaves it
+  await docs.click('.docs-main')
+  await docs.keyboard.press('/')
+  await docs.waitForTimeout(150)
+  check('/ jumps to the search box',
+    await docs.evaluate(() => document.activeElement?.className.includes('search')))
+  await docs.keyboard.type('interp')
+  await docs.keyboard.press('Escape')
+  await docs.waitForTimeout(200)
+  check('Escape clears it', (await docs.$eval('.search', (e) => e.value)) === '')
+
+  // anchors and links
+  const anchors = await docs.$$eval('.entry[id]', (els) => els.map((e) => e.id))
+  check('every entry can be linked to', anchors.includes('solve') && anchors.includes('interp'),
+    `${anchors.length} anchors`)
+  const examples = await docs.$$eval('a[href^="/app?example="]', (els) => els.length)
+  check('the reference offers the worked examples', examples >= 4, `${examples} links`)
+
+  const overflow = await docs.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check('docs: no horizontal overflow', overflow === 0, `${overflow}px`)
+  await docs.setViewportSize({ width: 390, height: 780 })
+  await docs.waitForTimeout(300)
+  check('docs on a phone: no horizontal overflow',
+    (await docs.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0)
+  check('the reference threw nothing', problems.length === 0, problems.join(' | '))
+  await docs.screenshot({ path: 'verify-docs.png' })
+  await docs.close()
+}
+
+// 21. an example opens in the app, once
+{
+  const opened = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  await opened.goto('http://localhost:4173/app?example=pump')
+  await opened.waitForSelector('.sheet-page')
+  await opened.waitForTimeout(600)
+
+  const state = async () =>
+    opened.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
+  const first = await state()
+  const sheets = first.projects.flatMap((project) => project.sheets)
+  check('the example arrives as a sheet', sheets.some((sheet) => sheet.name.includes('Pump')),
+    JSON.stringify(sheets.map((sheet) => sheet.name)))
+  check('and the address no longer says so',
+    !(await opened.evaluate(() => window.location.search)))
+
+  const text = (await opened.$eval('.output-pane', (e) => e.textContent)).replace(/\s+/g, ' ')
+  check('it evaluates: Colebrook solved, head about 9.1 m',
+    /0\.019/.test(text) && /9\.1/.test(text), text.slice(-70))
+  check('with no errors', (await opened.$$('.error')).length === 0)
+
+  await opened.reload()
+  await opened.waitForTimeout(600)
+  const after = await state()
+  check('reloading does not add it again',
+    after.projects.flatMap((project) => project.sheets).length === sheets.length,
+    `${after.projects.flatMap((project) => project.sheets).length} sheets`)
+  await opened.close()
+}
+
+// 22. the Help button leaves for the reference
+{
+  const app = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  await app.goto('http://localhost:4173/app')
+  await app.waitForSelector('.sheet-page')
+  const help = await app.$('.toolbar-link')
+  check('Help is a link to the reference',
+    (await help?.getAttribute('href')) === '/docs' && (await help?.textContent()) === 'Help')
+  await app.close()
+}
+
+// 23. nothing clipped or overflowing, in either theme and at phone width
 for (const [theme, width, height, tag] of [
   ['light', 1400, 900, 'light'],
   ['dark', 1400, 900, 'dark'],
@@ -549,7 +697,7 @@ for (const [theme, width, height, tag] of [
   const view = await browser.newPage({ viewport: { width, height }, colorScheme: theme })
   await view.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)),
     { ...seed, settings: { ...seed.settings, theme } })
-  await view.goto('http://localhost:4173/')
+  await view.goto('http://localhost:4173/app')
   await view.waitForSelector('.sheet-page')
   await view.waitForTimeout(400)
   const overflow = await view.evaluate(

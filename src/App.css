@@ -1,96 +1,6 @@
-:root {
-  --ink: #1a1a18;
-  --muted: #6b6b66;
-  --faint: #6e6b64;
-  --rule: #e3e1dc;
-  --rule-strong: #c9c6bf;
-  --paper: #ffffff;
-  --panel: #faf9f7;
-  --shade: #f2f0ec;
-  --hover: rgba(0, 0, 0, 0.04);
-  --chip-bg: rgba(0, 0, 0, 0.03);
-  --pass: #1b6e3c;
-  --pass-bg: #eef6f0;
-  --warn: #8a5a00;
-  --warn-bg: #fdf6e8;
-  --error: #b3261e;
-  --error-bg: #fdf0ef;
-
-  --editor-bg: #faf9f7;
-  --syn-heading: #1a1a18;
-  --syn-comment: #3f7a43;
-  --syn-keyword: #7a3fa0;
-  --syn-number: #0a6b52;
-  --syn-unit: #8a5a00;
-  --syn-string: #a3341f;
-  --syn-operator: #6b6b66;
-  --syn-variable: #14396b;
-}
-
-/* Dark is the same document in a dimmer room: same hierarchy, same restraint. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --ink: #e8e6e1;
-    --muted: #a8a49c;
-    --faint: #86827a;
-    --rule: #35332f;
-    --rule-strong: #4a4742;
-    --paper: #1b1a18;
-    --panel: #141312;
-    --shade: #1f1e1c;
-    --hover: rgba(255, 255, 255, 0.06);
-    --chip-bg: rgba(255, 255, 255, 0.05);
-    --pass: #79c496;
-    --pass-bg: #16241b;
-    --warn: #dcae62;
-    --warn-bg: #2a2214;
-    --error: #f0857d;
-    --error-bg: #2b1a18;
-
-    --editor-bg: #171615;
-    --syn-heading: #e8e6e1;
-    --syn-comment: #7fa06b;
-    --syn-keyword: #c79ae0;
-    --syn-number: #b5cea8;
-    --syn-unit: #dcae62;
-    --syn-string: #e3907c;
-    --syn-operator: #a8a49c;
-    --syn-variable: #9cdcfe;
-  }
-}
-
-:root[data-theme='dark'] {
-  --ink: #e8e6e1;
-  --muted: #a8a49c;
-  --faint: #86827a;
-  --rule: #35332f;
-  --rule-strong: #4a4742;
-  --paper: #1b1a18;
-  --panel: #141312;
-  --shade: #1f1e1c;
-  --hover: rgba(255, 255, 255, 0.06);
-  --chip-bg: rgba(255, 255, 255, 0.05);
-  --pass: #79c496;
-  --pass-bg: #16241b;
-  --warn: #dcae62;
-  --warn-bg: #2a2214;
-  --error: #f0857d;
-  --error-bg: #2b1a18;
-
-  --editor-bg: #171615;
-  --syn-heading: #e8e6e1;
-  --syn-comment: #7fa06b;
-  --syn-keyword: #c79ae0;
-  --syn-number: #b5cea8;
-  --syn-unit: #dcae62;
-  --syn-string: #e3907c;
-  --syn-operator: #a8a49c;
-  --syn-variable: #9cdcfe;
-}
-
-* {
-  box-sizing: border-box;
-}
+/* The palette and the page basics live in theme.css, shared with the landing
+   page and the reference. */
+@import './theme.css';
 
 .save-alert {
   position: fixed;
@@ -333,6 +243,22 @@ body {
   background: var(--hover);
 }
 
+/* The Help link leaves for the reference, so it is a link and looks like the
+   buttons beside it rather than pretending to be one. */
+.toolbar-link {
+  font-size: 12px;
+  padding: 4px 9px;
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.toolbar-link:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
 /* An open panel keeps its button outlined, so the toolbar says which one is
    showing after the mouse has moved away. */
 .toolbar button.on {
@@ -501,6 +427,14 @@ body {
   margin: 0;
   font-size: 11px;
   color: var(--faint);
+}
+
+/* A reason written on the line it explains: which drawing, which clause. */
+.line-note {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 /* --------------------------------------------------------- paginated print */

@@ -4,7 +4,8 @@ An engineering calculation sheet in the browser. Write maths in plain text with 
 evaluates, checks that dimensions are consistent, and renders each line the way an engineer
 writes it on paper: formula, then the numbers substituted in, then the result.
 
-Live: https://longhand-six.vercel.app
+Live: https://longhand-six.vercel.app — the landing page at `/`, the tool at `/app`, the
+reference at `/docs`.
 
 ## Run it
 
@@ -12,10 +13,15 @@ You need Node.js installed (nodejs.org, LTS version).
 
 ```bash
 npm install
-npm run dev     # http://localhost:5173
-npm test        # the engine and store tests
+npm run dev     # http://localhost:5173 (landing), /app, /docs
+npm test        # the engine, store and documentation tests
 npm run build   # production build, what Vercel runs
+npm run verify  # the browser pass: build, run `npx vite preview --port 4173`, then this
 ```
+
+Three pages are built from one project: `index.html` is the landing page, `app.html` the
+tool, `docs.html` the reference. `vite.config.ts` rewrites `/app` and `/docs` in dev and
+preview so local URLs match what `vercel.json`'s `cleanUrls` serves in production.
 
 Edit the left pane; the right pane updates as you type. `Cmd/Ctrl + P` prints the sheet —
 the print stylesheet hides the editor, because a calculation sheet is a document.
@@ -57,6 +63,20 @@ the panels, Cmd/Ctrl+S saves the sheet as a file, and Escape closes whatever is 
 title block of new projects — and says plainly what an account would be for, since there
 isn't one.
 
+## The reference is a module, not a page
+
+`src/reference.ts` holds every command, its one-line meaning, the longer explanation and a
+runnable example. The docs page renders it, the app's Help button points at that page, and
+`src/reference.test.ts` runs every example through the engine. Documentation that is not
+run is documentation that is wrong — this arrangement replaced a syntax list written out by
+hand in two places, which had already started to drift.
+
+`src/examples.ts` holds four worked calculations — a steel beam against a section table, a
+pump duty point that solves Colebrook, a wall U-value with an uncertain insulation
+thickness, and a density measurement with its error budget. They are the landing page's
+gallery, they open in the app from `/app?example=beam`, and the same test insists each one
+evaluates with no errors and lands on its hand-checked numbers.
+
 ## Syntax
 
 ```
@@ -64,6 +84,7 @@ isn't one.
 // prose
 
 b      = 300 mm                assignment with units
+b      = 300 mm  // drawing A-102     a note on the line it explains
 b      = 300 mm +- 2 mm        with a tolerance (or the ± character)
 W      = b*h^2/6               formula; result keeps the units you wrote
 sigma  = M_Ed/W  -> MPa        -> forces a display unit
@@ -138,6 +159,10 @@ Greek letters (`sigma`, `alpha`, `Delta`).
 - `src/editor.tsx` — CodeMirror: highlighting, error gutter, inline results, autocomplete.
 - `src/Plot.tsx` — hand-written SVG. No charting library.
 - `src/App.tsx` — the two panes, the sidebar, the panels, KaTeX.
+- `src/reference.ts`, `src/docs/` — the reference content and the page that renders it,
+  with a search that matches on what people call things elsewhere (goal seek, vlookup).
+- `src/examples.ts`, `src/landing/` — the worked calculations and the landing page.
+- `src/theme.css` — the palette, shared by all three pages.
 
 ## Speed
 
@@ -169,6 +194,7 @@ loads only when that button is pressed.
 
 1. **Share by link.** The whole sheet compresses into a URL hash, so a link opens someone
    else's calculation with no account and no server. Cheapest possible distribution.
+   `/app?example=` is the crude version of it that exists today.
 2. **A checks summary** at the top of a printed sheet: every check with its verdict and
    margin, which is the first thing a reviewer looks for.
 3. **Correlated inputs.** Propagation assumes independence, which is the usual assumption

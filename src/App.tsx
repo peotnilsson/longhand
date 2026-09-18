@@ -9,7 +9,6 @@ import {
   activeSheet,
   backupAgeDays,
   duplicateNames,
-  EXAMPLE,
   loadStore,
   moveSheet,
   moveSheetToProject,
@@ -27,6 +26,7 @@ import {
   type Store,
   type Theme,
 } from './store'
+import { findExample } from './examples'
 import {
   chooseExistingFile,
   chooseNewFile,
@@ -68,6 +68,7 @@ function Rendered({ line }: { line: Line }) {
       return (
         <div className="calc-block">
           <Tex tex={line.tex} className="calc definition" />
+          {line.note && <p className="line-note">{line.note}</p>}
           {line.warning && <p className="warning">{line.warning}</p>}
         </div>
       )
@@ -75,7 +76,10 @@ function Rendered({ line }: { line: Line }) {
     case 'check':
       return (
         <div className={`check ${line.pass ? 'pass' : 'fail'}`}>
-          <Tex tex={line.tex} className="calc" />
+          <div>
+            <Tex tex={line.tex} className="calc" />
+            {line.note && <p className="line-note">{line.note}</p>}
+          </div>
           <div className="verdict">
             <span className="badge">{line.pass ? 'OK' : 'NOT OK'}</span>
             {line.margin && <span className="margin">{line.margin}</span>}
@@ -130,6 +134,7 @@ function Rendered({ line }: { line: Line }) {
               )}
             </div>
           )}
+          {line.note && <p className="line-note">{line.note}</p>}
           {line.warning && <p className="warning">{line.warning}</p>}
         </div>
       )
@@ -259,149 +264,6 @@ function SheetDocument({
 }
 
 /**
- * The reference. A calculation language is only worth having if you can find
- * out what it does without leaving the sheet, so this lists every line kind
- * with a real example rather than describing the app in general terms.
- */
-function HelpPanel({ onExample }: { onExample: () => void }) {
-  const rows: [string, string][][] = [
-    [
-      ['b = 300 mm', 'A value with a unit. Any unit mathjs knows: mm, kN, MPa, kg, s, degC.'],
-      ['W = b*h^2/6', 'A formula. It shows the symbols, then your numbers substituted in, then the result.'],
-      ['sigma = M/W -> MPa', 'The arrow forces the unit the result is shown in.'],
-      ['b = 300 mm +- 2 mm', 'A tolerance. Write ± if you prefer. It propagates to everything below.'],
-      ['sigma <= f_ck', 'A check. Renders as OK or NOT OK with how much margin is left.'],
-      ['A(d) = pi*d^2/4', 'Your own function. Call it like any other: A(20 mm).'],
-      [
-        'b_req = solve sigma = f_ck for b',
-        'The other question: what b would make sigma equal f_ck? It varies b, re-runs the lines that depend on it, and gives you the value. Add "from 100 mm to 900 mm" if it needs a hint about where to look.',
-      ],
-      ['# Heading', 'A heading. The first one becomes the sheet title in the title block.'],
-      ['// note', 'A line of prose, for the reasoning a reviewer needs.'],
-    ],
-    [
-      ['table', 'Starts a table: one row per case, one column per quantity.'],
-      ['  s | bw | Wt = bw*h^2/6', 'The header row. A column with an = is computed for every row.'],
-      ['  A | 300 mm', 'A case. Blank cells are filled by the computed columns.'],
-      ['end', 'Closes the table.'],
-      ['plot sigma vs b from 200 mm to 400 mm', 'Sweeps one input and draws the result.'],
-      ['import "Loads"', 'Brings in the definitions from another sheet in this project, by name.'],
-      ['table steel', 'Give a table a name and its columns become data: steel.h, steel.A.'],
-      [
-        'interp(250 mm, steel.h, steel.A)',
-        'Reads between two rows of a named table. Outside it is an error, not an extrapolation.',
-      ],
-      [
-        'lookup("IPE300", steel.profile, steel.A)',
-        'Picks the row with that label.',
-      ],
-      ['sum(steel.A)', 'And max, min, mean — a named column is an ordinary list of values.'],
-    ],
-  ]
-
-  return (
-    <div className="panel help">
-      <section>
-        <h3>Lines</h3>
-        <dl className="syntax">
-          {rows[0].map(([code, text]) => (
-            <div key={code}>
-              <dt>
-                <code>{code}</code>
-              </dt>
-              <dd>{text}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section>
-        <h3>Many cases at once</h3>
-        <dl className="syntax">
-          {rows[1].map(([code, text]) => (
-            <div key={code}>
-              <dt>
-                <code>{code}</code>
-              </dt>
-              <dd>{text}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section>
-        <h3>What it does for you</h3>
-        <p className="hint">
-          Units are kept as you wrote them: a moment stays kN·m instead of collapsing into kJ, and
-          mm·mm² stays mm³. Where two units share a dimension — m and mm in a stress — it converts,
-          because the alternative is nonsense. Mixing dimensions is an error, named on the line:
-          adding a length to a pressure will not quietly give you a number.
-        </p>
-        <p className="hint">
-          A symbol used before it is defined says so rather than reading as zero, and defining one
-          twice warns you, since the lines below will use the second value. Underscores become
-          subscripts (<code>M_Ed</code>) and Greek names become Greek letters (<code>sigma</code>,{' '}
-          <code>Delta</code>).
-        </p>
-      </section>
-
-      <section>
-        <h3>Projects and printing</h3>
-        <p className="hint">
-          A project is a set of sheets with one title block, printed as one package — Project →
-          Preview whole project, then Print. ↑ ↓ in the sidebar set the order sheets print in.
-          Print on its own prints the sheet you are looking at.
-        </p>
-        <p className="hint">
-          In the package preview, <strong>Number the pages</strong> chops the document into real
-          A4 pages, each carrying its sheet's title and "Page 3 of 7". That takes a moment and is
-          worth it for something you are handing in; printing without it is faster and identical
-          but for the numbers.
-        </p>
-      </section>
-
-      <section>
-        <h3>Where your work is kept</h3>
-        <p className="hint">
-          In this browser, which means a cleared browser is a lost sheet. Settings → Data can{' '}
-          <strong>keep a copy on disk</strong>: choose a file once and every change is written to
-          it, so the calculations live somewhere you can back up and find again. Chrome and Edge
-          can do this; Safari and Firefox cannot, and there Export backup is the way.
-        </p>
-      </section>
-
-      <section>
-        <h3>Keyboard</h3>
-        <dl className="syntax">
-          {[
-            ['Alt + N', 'New sheet'],
-            ['Alt + [ / ]', 'Previous / next sheet in this project'],
-            ['Alt + P / H / ,', 'Project, Help, Settings'],
-            ['Cmd/Ctrl + S', 'Save this sheet as a file'],
-            ['Escape', 'Close whatever is open'],
-          ].map(([keys, what]) => (
-            <div key={keys}>
-              <dt>
-                <code>{keys}</code>
-              </dt>
-              <dd>{what}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <section>
-        <h3>Try it</h3>
-        <div className="settings-buttons">
-          <button onClick={onExample}>New sheet from the example</button>
-        </div>
-        <p className="hint">Adds a worked beam check to this project, using every line kind above.</p>
-      </section>
-    </div>
-  )
-}
-
-/**
  * The page rules Paged.js needs, kept here rather than in App.css because they
  * are only ever handed to Paged.js: browsers cannot put a counter in an @page
  * margin box themselves, which is the whole reason this path exists.
@@ -433,7 +295,7 @@ const PAGE_CSS = `
 .title-block { break-after: avoid; }
 `
 
-type Panel = 'none' | 'meta' | 'settings' | 'profile' | 'help'
+type Panel = 'none' | 'meta' | 'settings' | 'profile'
 
 /** "Peo Nilsson" -> "PN", "Peo" -> "P", nothing -> a neutral mark. */
 const initials = (name: string): string => {
@@ -481,6 +343,40 @@ export default function App() {
     const timer = setTimeout(() => setDeleted(null), 12_000)
     return () => clearTimeout(timer)
   }, [deleted])
+
+  /**
+   * /app?example=beam opens a worked calculation as a new sheet. It is how the
+   * landing page and the reference hand someone something real to edit, and it
+   * runs once: the parameter is taken out of the address immediately, so a
+   * reload does not keep adding copies.
+   */
+  const exampleLoaded = useRef(false)
+  useEffect(() => {
+    if (exampleLoaded.current) return
+    const parameters = new URLSearchParams(window.location.search)
+    const example = findExample(parameters.get('example'))
+    exampleLoaded.current = true
+    if (!example) return
+
+    window.history.replaceState(null, '', window.location.pathname)
+    setStore((current) => {
+      const id = newId()
+      const target = activeProject(current)
+      return {
+        ...current,
+        activeProjectId: target.id,
+        activeSheetId: id,
+        projects: current.projects.map((candidate) =>
+          candidate.id === target.id
+            ? {
+                ...candidate,
+                sheets: [...candidate.sheets, { id, name: example.name, source: example.source }],
+              }
+            : candidate,
+        ),
+      }
+    })
+  }, [])
 
   // A file chosen in an earlier session is still there; the permission may not be.
   useEffect(() => {
@@ -863,7 +759,7 @@ export default function App() {
           toggle('meta')
           break
         case 'h':
-          toggle('help')
+          window.open('/docs', '_blank', 'noreferrer')
           break
         case ',':
           toggle('settings')
@@ -1016,12 +912,9 @@ export default function App() {
             >
               Settings
             </button>
-            <button
-              className={panel === 'help' ? 'on' : ''}
-              onClick={() => setPanel((current) => (current === 'help' ? 'none' : 'help'))}
-            >
+            <a className="toolbar-link" href="/docs" target="_blank" rel="noreferrer">
               Help
-            </button>
+            </a>
             <button onClick={() => fileInput.current?.click()}>Open</button>
             <button onClick={save}>Save</button>
             <button onClick={() => window.print()}>Print</button>
@@ -1267,8 +1160,6 @@ export default function App() {
             </section>
           </div>
         )}
-
-        {panel === 'help' && <HelpPanel onExample={() => addSheet('Example', EXAMPLE)} />}
 
         <Editor
           value={sheet.source}

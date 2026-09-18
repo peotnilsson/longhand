@@ -1,0 +1,113 @@
+/**
+ * The palette, shared by all three pages: the landing page, the reference and
+ * the app. Every colour is a token so one highlight style, one print
+ * stylesheet and one set of components serve both themes.
+ */
+
+:root {
+  --ink: #1a1a18;
+  --muted: #6b6b66;
+  --faint: #6e6b64;
+  --rule: #e3e1dc;
+  --rule-strong: #c9c6bf;
+  --paper: #ffffff;
+  --panel: #faf9f7;
+  --shade: #f2f0ec;
+  --hover: rgba(0, 0, 0, 0.04);
+  --chip-bg: rgba(0, 0, 0, 0.03);
+  --pass: #1b6e3c;
+  --pass-bg: #eef6f0;
+  --warn: #8a5a00;
+  --warn-bg: #fdf6e8;
+  --error: #b3261e;
+  --error-bg: #fdf0ef;
+
+  --editor-bg: #faf9f7;
+  --syn-heading: #1a1a18;
+  --syn-comment: #3f7a43;
+  --syn-keyword: #7a3fa0;
+  --syn-number: #0a6b52;
+  --syn-unit: #8a5a00;
+  --syn-string: #a3341f;
+  --syn-operator: #6b6b66;
+  --syn-variable: #14396b;
+}
+
+/* Dark is the same document in a dimmer room: same hierarchy, same restraint. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ink: #e8e6e1;
+    --muted: #a8a49c;
+    --faint: #86827a;
+    --rule: #35332f;
+    --rule-strong: #4a4742;
+    --paper: #1b1a18;
+    --panel: #141312;
+    --shade: #1f1e1c;
+    --hover: rgba(255, 255, 255, 0.06);
+    --chip-bg: rgba(255, 255, 255, 0.05);
+    --pass: #79c496;
+    --pass-bg: #16241b;
+    --warn: #dcae62;
+    --warn-bg: #2a2214;
+    --error: #f0857d;
+    --error-bg: #2b1a18;
+
+    --editor-bg: #171615;
+    --syn-heading: #e8e6e1;
+    --syn-comment: #7fa06b;
+    --syn-keyword: #c79ae0;
+    --syn-number: #b5cea8;
+    --syn-unit: #dcae62;
+    --syn-string: #e3907c;
+    --syn-operator: #a8a49c;
+    --syn-variable: #9cdcfe;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ink: #e8e6e1;
+  --muted: #a8a49c;
+  --faint: #86827a;
+  --rule: #35332f;
+  --rule-strong: #4a4742;
+  --paper: #1b1a18;
+  --panel: #141312;
+  --shade: #1f1e1c;
+  --hover: rgba(255, 255, 255, 0.06);
+  --chip-bg: rgba(255, 255, 255, 0.05);
+  --pass: #79c496;
+  --pass-bg: #16241b;
+  --warn: #dcae62;
+  --warn-bg: #2a2214;
+  --error: #f0857d;
+  --error-bg: #2b1a18;
+
+  --editor-bg: #171615;
+  --syn-heading: #e8e6e1;
+  --syn-comment: #7fa06b;
+  --syn-keyword: #c79ae0;
+  --syn-number: #b5cea8;
+  --syn-unit: #dcae62;
+  --syn-string: #e3907c;
+  --syn-operator: #a8a49c;
+  --syn-variable: #9cdcfe;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+pre,
+kbd {
+  font-family: ui-monospace, Menlo, monospace;
+}

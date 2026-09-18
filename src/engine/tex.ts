@@ -41,9 +41,23 @@ const cleanTex = (tex: string): string =>
 export const toTex = (node: MathNode, scope: Record<string, unknown>): string =>
   cleanTex(
     node.toTex({
-      handler: (n: any) => (n.isSymbolNode ? symbolToTex(n.name, scope) : undefined),
+      handler: (n: any) => {
+        if (n.isSymbolNode) return symbolToTex(n.name, scope)
+        // steel.W_el is a column of a named table: set it upright as one name
+        // rather than letting the underscore become a subscript of a subscript.
+        if (n.isAccessorNode && n.object?.isSymbolNode) {
+          const column = n.index?.dimensions?.[0]
+          const name = column?.value ?? column?.name
+          if (typeof name === 'string') {
+            return `\\mathrm{${escapeName(n.object.name)}}.\\mathrm{${escapeName(name)}}`
+          }
+        }
+        return undefined
+      },
     } as any),
   )
+
+const escapeName = (name: string): string => name.replace(/_/g, '\\_')
 
 /**
  * Render an already-formatted value string ("250 kN*m") as TeX.
@@ -58,19 +72,88 @@ export function valueToTex(formatted: string, scope: Record<string, unknown>): s
   if (match) {
     const [, number, , unit] = match
     const tex = numberToTex(number)
-    if (!unit) return tex
-    try {
-      // the unit alone through mathjs, which knows how to set it upright
-      return `${tex}~${toTex(math.parse(`1 ${unit}`), scope).replace(/^1~?/, '')}`
-    } catch {
-      return `${tex}~\\mathrm{${unit}}`
-    }
+    return unit ? `${tex}~${unitToTex(unit)}` : tex
   }
   try {
     return toTex(math.parse(formatted), scope)
   } catch {
     return `\\text{${formatted}}`
   }
+}
+
+/**
+ * "kN/m" becomes a fraction, "mm^3" a power, "kN*m" a product.
+ *
+ * Written out here rather than handed to mathjs, which renders a unit only as
+ * part of a quantity: asking it for "1 kN/m" and removing the 1 leaves the 1
+ * stranded in the numerator, which is how the landing-page screenshot came to
+ * read 6 · (1 kN)/m.
+ */
+export function unitToTex(unit: string): string {
+  const factors = parseUnitFactors(unit.trim())
+  if (factors.length === 0) return `\\mathrm{${unit}}`
+
+  const above = factors.filter((factor) => factor.power > 0)
+  const below = factors.filter((factor) => factor.power < 0)
+  const top = above.length ? above.map(render).join('\\cdot ') : '1'
+  if (below.length === 0) return top
+
+  const bottom = below
+    .map((factor) => render({ name: factor.name, power: -factor.power }))
+    .join('\\cdot ')
+  return `\\frac{${top}}{${bottom}}`
+}
+
+const render = ({ name, power }: { name: string; power: number }): string => {
+  const upright = `\\mathrm{${name.replace(/µ/g, '\\mu ')}}`
+  return power === 1 ? upright : `${upright}^{${power}}`
+}
+
+/**
+ * Read a unit string into signed factors, so "W/m^2/K" and "W/(m^2*K)" — the
+ * two ways the same unit gets written — both come out as W over m² K. A slash
+ * applies to the one factor or bracketed group that follows it, which is how
+ * an engineer reads it and how mathjs writes it.
+ */
+function parseUnitFactors(unit: string, outerSign = 1): { name: string; power: number }[] {
+  const factors: { name: string; power: number }[] = []
+  let index = 0
+  let sign = outerSign
+
+  while (index < unit.length) {
+    const character = unit[index]
+
+    if (character === ' ' || character === '*' || character === '·') {
+      index += 1
+      continue
+    }
+    if (character === '/') {
+      sign = -outerSign
+      index += 1
+      continue
+    }
+    if (character === '(') {
+      let depth = 1
+      let end = index + 1
+      while (end < unit.length && depth > 0) {
+        if (unit[end] === '(') depth += 1
+        if (unit[end] === ')') depth -= 1
+        end += 1
+      }
+      factors.push(...parseUnitFactors(unit.slice(index + 1, end - 1), sign))
+      sign = outerSign
+      index = end
+      continue
+    }
+
+    const match = /^([A-Za-zµΩ°%]+)(?:\^(-?\d+(?:\.\d+)?))?/.exec(unit.slice(index))
+    if (!match) return []
+    factors.push({ name: match[1], power: sign * Number(match[2] ?? 1) })
+    sign = outerSign
+    index += match[0].length
+  }
+
+  return factors
 }
 
 /** "1.25e7" -> 1.25 \cdot 10^{7}, anything else unchanged. */
