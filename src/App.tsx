@@ -52,15 +52,26 @@ interface Sheet {
   meta: Meta
 }
 
+type Theme = 'system' | 'light' | 'dark'
+
+interface Settings {
+  theme: Theme
+  /** Pre-fills the title block of new sheets. */
+  author: string
+  project: string
+}
+
 interface Store {
   sheets: Sheet[]
   activeId: string
   precision: number
   mode: ToleranceMode
+  settings: Settings
 }
 
 const KEY = 'longhand:store'
 const emptyMeta = (): Meta => ({ project: '', author: '', revision: 'A', checkedBy: '' })
+const defaultSettings = (): Settings => ({ theme: 'system', author: '', project: '' })
 const newId = () => Math.random().toString(36).slice(2, 10)
 
 function loadStore(): Store {
@@ -68,7 +79,9 @@ function loadStore(): Store {
     const saved = localStorage.getItem(KEY)
     if (saved) {
       const parsed = JSON.parse(saved) as Store
-      if (parsed.sheets?.length) return parsed
+      if (parsed.sheets?.length) {
+        return { ...parsed, settings: { ...defaultSettings(), ...parsed.settings } }
+      }
     }
     // migrate the single-sheet version
     const legacy = localStorage.getItem('longhand:source')
@@ -79,6 +92,7 @@ function loadStore(): Store {
         activeId: id,
         precision: 4,
         mode: 'quadrature',
+        settings: defaultSettings(),
       }
     }
   } catch {
@@ -90,6 +104,7 @@ function loadStore(): Store {
     activeId: id,
     precision: 4,
     mode: 'quadrature',
+    settings: defaultSettings(),
   }
 }
 
@@ -119,7 +134,12 @@ function Rendered({ line }: { line: Line }) {
       )
 
     case 'definition':
-      return <Tex tex={line.tex} className="calc definition" />
+      return (
+        <div className="calc-block">
+          <Tex tex={line.tex} className="calc definition" />
+          {line.warning && <p className="warning">{line.warning}</p>}
+        </div>
+      )
 
     case 'check':
       return (
@@ -134,6 +154,7 @@ function Rendered({ line }: { line: Line }) {
 
     case 'table':
       return (
+        <div className="table-scroll">
         <table className="sheet-table">
           <thead>
             <tr>
@@ -154,6 +175,7 @@ function Rendered({ line }: { line: Line }) {
             ))}
           </tbody>
         </table>
+        </div>
       )
 
     case 'plot':
@@ -175,6 +197,7 @@ function Rendered({ line }: { line: Line }) {
               )}
             </div>
           )}
+          {line.warning && <p className="warning">{line.warning}</p>}
         </div>
       )
   }
@@ -190,7 +213,8 @@ function Tex({ tex, className }: { tex: string; className: string }) {
 
 export default function App() {
   const [store, setStore] = useState<Store>(loadStore)
-  const [showMeta, setShowMeta] = useState(false)
+  const [panel, setPanel] = useState<'none' | 'meta' | 'settings'>('none')
+  const backupInput = useRef<HTMLInputElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -200,6 +224,12 @@ export default function App() {
       /* blocked storage - the session still works, it just will not persist */
     }
   }, [store])
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (store.settings.theme === 'system') root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', store.settings.theme)
+  }, [store.settings.theme])
 
   const active = store.sheets.find((sheet) => sheet.id === store.activeId) ?? store.sheets[0]
 
@@ -245,7 +275,16 @@ export default function App() {
       activeId: id,
       sheets: [
         ...current.sheets,
-        { id, name: `Sheet ${current.sheets.length + 1}`, source: '# New calculation\n\n', meta: emptyMeta() },
+        {
+          id,
+          name: `Sheet ${current.sheets.length + 1}`,
+          source: '# New calculation\n\n',
+          meta: {
+            ...emptyMeta(),
+            author: current.settings.author,
+            project: current.settings.project,
+          },
+        },
       ],
     }))
   }
@@ -274,6 +313,35 @@ export default function App() {
     link.download = `${slug(title)}.calc`
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  const setSettings = (patch: Partial<Settings>) =>
+    setStore((current) => ({ ...current, settings: { ...current.settings, ...patch } }))
+
+  const exportAll = () => {
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' }),
+    )
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'longhand-backup.json'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importAll = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      try {
+        const parsed = JSON.parse(await file.text()) as Store
+        if (parsed.sheets?.length) {
+          setStore({ ...parsed, settings: { ...defaultSettings(), ...parsed.settings } })
+        }
+      } catch {
+        /* not a backup file - leave everything as it is */
+      }
+    }
+    event.target.value = ''
   }
 
   const open = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -331,7 +399,18 @@ export default function App() {
             aria-label="Sheet name"
           />
           <div className="toolbar-actions">
-            <button onClick={() => setShowMeta((shown) => !shown)}>Title block</button>
+            <button
+              className={panel === 'meta' ? 'on' : ''}
+              onClick={() => setPanel((current) => (current === 'meta' ? 'none' : 'meta'))}
+            >
+              Title block
+            </button>
+            <button
+              className={panel === 'settings' ? 'on' : ''}
+              onClick={() => setPanel((current) => (current === 'settings' ? 'none' : 'settings'))}
+            >
+              Settings
+            </button>
             <button onClick={() => fileInput.current?.click()}>Open</button>
             <button onClick={save}>Save</button>
             <button onClick={() => window.print()}>Print</button>
@@ -369,8 +448,8 @@ export default function App() {
           <input ref={fileInput} type="file" accept=".calc,.txt,text/plain" onChange={open} hidden />
         </div>
 
-        {showMeta && (
-          <div className="meta-editor">
+        {panel === 'meta' && (
+          <div className="panel meta-editor">
             {(
               [
                 ['project', 'Project'],
@@ -389,6 +468,54 @@ export default function App() {
                 />
               </label>
             ))}
+          </div>
+        )}
+
+        {panel === 'settings' && (
+          <div className="panel settings">
+            <label>
+              Appearance
+              <select
+                value={store.settings.theme}
+                onChange={(event) => setSettings({ theme: event.target.value as Theme })}
+              >
+                <option value="system">Follow the system</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <label>
+              Your name
+              <input
+                value={store.settings.author}
+                placeholder="goes on new sheets"
+                onChange={(event) => setSettings({ author: event.target.value })}
+              />
+            </label>
+            <label>
+              Default project
+              <input
+                value={store.settings.project}
+                placeholder="goes on new sheets"
+                onChange={(event) => setSettings({ project: event.target.value })}
+              />
+            </label>
+            <div className="settings-data">
+              <span className="settings-caption">
+                Everything is stored in this browser only.
+              </span>
+              <div className="settings-buttons">
+                <button onClick={exportAll}>Export backup</button>
+                <button onClick={() => backupInput.current?.click()}>Restore backup</button>
+              </div>
+            </div>
+            <input
+              ref={backupInput}
+              type="file"
+              accept="application/json,.json"
+              onChange={importAll}
+              hidden
+            />
           </div>
         )}
 

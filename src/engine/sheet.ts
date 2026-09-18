@@ -41,8 +41,8 @@ export type Line =
   | { kind: 'heading'; text: string; level: number }
   | { kind: 'prose'; text: string }
   | { kind: 'note'; text: string }
-  | { kind: 'calc'; tex: string; summary: string; tolerance?: ToleranceView }
-  | { kind: 'definition'; tex: string; summary: string }
+  | { kind: 'calc'; tex: string; summary: string; tolerance?: ToleranceView; warning?: string }
+  | { kind: 'definition'; tex: string; summary: string; warning?: string }
   | { kind: 'check'; tex: string; pass: boolean; margin: string | null; summary: string }
   | { kind: 'table'; headers: string[]; rows: TableCell[][]; summary: string }
   | { kind: 'plot'; data: PlotData; summary: string }
@@ -179,12 +179,17 @@ function evaluateStatement(
 
     // ---- function definition:  A(d) = pi*d^2/4
     if (type === 'FunctionAssignmentNode') {
+      const functionName = (node as any).name
+      const redefined = context.scope[functionName] !== undefined
       node.evaluate(context.scope)
-      context.definitions.push({ name: (node as any).name, node })
+      context.definitions.push({ name: functionName, node })
       return {
         kind: 'definition',
         tex: toTex(node, context.scope),
-        summary: `${(node as any).name}() defined`,
+        summary: `${functionName}() defined`,
+        warning: redefined
+          ? `${functionName} was already defined above — this replaces it for the lines below.`
+          : undefined,
       }
     }
 
@@ -233,14 +238,28 @@ function evaluateStatement(
     }
 
     // ---- assignment or bare expression
+    const isAssignment = type === 'AssignmentNode'
+    const name: string | null = isAssignment ? (node as any).object.name : null
+
+    // Read the previous value BEFORE evaluating: evaluating an assignment node
+    // writes straight into the scope, so afterwards every line looks like a
+    // redefinition of itself.
+    const previous = name === null ? undefined : context.scope[name]
+
     let value = node.evaluate(context.scope)
     if (displayUnit) {
       if (!isUnitValue(value)) throw new Error(`Cannot convert a plain number to ${displayUnit}`)
       value = (value as any).to(displayUnit)
     }
 
-    const isAssignment = type === 'AssignmentNode'
-    const name: string | null = isAssignment ? (node as any).object.name : null
+    // Redefinition is legal — a staged calculation sometimes revises a value —
+    // but silently is dangerous: a reviewer reading top to bottom has no way to
+    // see that everything above used the earlier number.
+    const warning =
+      previous === undefined
+        ? undefined
+        : `${name} was ${formatValue(previous, precision)} above — this redefines it for the lines below.`
+
     if (isAssignment) {
       context.scope[name!] = value
       context.definitions.push({ name: name!, node })
@@ -279,6 +298,7 @@ function evaluateStatement(
       tex: lhs + stages.join(' = '),
       summary: tolerance ? `= ${shown} ${tolerance.text}` : `= ${shown}`,
       tolerance,
+      warning,
     }
   } catch (error) {
     return { kind: 'error', source: line, message: explain(error, defined) }

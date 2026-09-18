@@ -8,7 +8,8 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view'
-import { StreamLanguage } from '@codemirror/language'
+import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
+import { tags } from '@lezer/highlight'
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
 import { unitNames, type Line } from './engine'
@@ -113,14 +114,27 @@ const errorGutter = (results: Line[]) =>
     const diagnostics: Diagnostic[] = []
     for (let number = 1; number <= view.state.doc.lines; number += 1) {
       const result = results[number - 1]
-      if (result?.kind !== 'error') continue
+      if (!result) continue
       const line = view.state.doc.line(number)
-      diagnostics.push({
-        from: line.from,
-        to: line.to,
-        severity: 'error',
-        message: result.message,
-      })
+
+      if (result.kind === 'error') {
+        diagnostics.push({
+          from: line.from,
+          to: line.to,
+          severity: 'error',
+          message: result.message,
+        })
+      } else if (
+        (result.kind === 'calc' || result.kind === 'definition') &&
+        result.warning
+      ) {
+        diagnostics.push({
+          from: line.from,
+          to: line.to,
+          severity: 'warning',
+          message: result.warning,
+        })
+      }
     }
     return diagnostics
   })
@@ -149,24 +163,54 @@ const completion = autocompletion({
   ],
 })
 
+/**
+ * Near-monochrome on purpose. CodeMirror's default highlight style is built for
+ * light backgrounds and turns variables and operators almost invisible in dark
+ * mode, and a calculation sheet does not need a rainbow: weight and a faint
+ * grey for comments are enough to scan by, and both work in either theme.
+ */
+const highlight = HighlightStyle.define([
+  { tag: tags.heading, color: 'var(--ink)', fontWeight: '600' },
+  { tag: tags.comment, color: 'var(--faint)' },
+  { tag: tags.keyword, color: 'var(--ink)', fontWeight: '600' },
+  { tag: tags.number, color: 'var(--ink)' },
+  { tag: tags.string, color: 'var(--muted)' },
+  { tag: tags.operator, color: 'var(--muted)' },
+  { tag: tags.variableName, color: 'var(--ink)' },
+])
+
 const theme = EditorView.theme({
-  '&': { fontSize: '14px', backgroundColor: 'transparent' },
-  '.cm-content': { fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', padding: '12px 0' },
+  '&': { fontSize: '14px', backgroundColor: 'transparent', color: 'var(--ink)' },
+  '.cm-content': {
+    fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+    padding: '12px 0',
+    caretColor: 'var(--ink)',
+  },
   '.cm-line': { lineHeight: '2', padding: '0 12px' },
-  '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: '#b8b5ae' },
-  '.cm-activeLine': { backgroundColor: 'rgba(0,0,0,0.025)' },
+  '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--faint)' },
+  '.cm-activeLine': { backgroundColor: 'var(--hover)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
+  '.cm-cursor': { borderLeftColor: 'var(--ink)' },
   '.cm-result': {
     marginLeft: '1.5em',
     padding: '0 6px',
     borderRadius: '4px',
     fontSize: '12px',
-    color: '#8a8780',
-    backgroundColor: 'rgba(0,0,0,0.03)',
+    color: 'var(--faint)',
+    backgroundColor: 'var(--chip-bg)',
   },
-  '.cm-result.pass': { color: '#1b6e3c', backgroundColor: 'rgba(27,110,60,0.08)' },
-  '.cm-result.fail': { color: '#b3261e', backgroundColor: 'rgba(179,38,30,0.08)' },
+  '.cm-result.pass': { color: 'var(--pass)', backgroundColor: 'var(--pass-bg)' },
+  '.cm-result.fail': { color: 'var(--error)', backgroundColor: 'var(--error-bg)' },
   '&.cm-focused': { outline: 'none' },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--paper)',
+    border: '1px solid var(--rule)',
+    color: 'var(--ink)',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    backgroundColor: 'var(--hover)',
+    color: 'var(--ink)',
+  },
 })
 
 export function Editor({
@@ -179,7 +223,18 @@ export function Editor({
   onChange: (next: string) => void
 }) {
   const extensions = useMemo(
-    () => [sheetLanguage, theme, completion, lintGutter(), errorGutter(results), inlineResults(results)],
+    () => [
+      sheetLanguage,
+      syntaxHighlighting(highlight),
+      theme,
+      // A formula should never need horizontal scrolling to read, and an
+      // unwrapped line widens the whole grid past a phone viewport.
+      EditorView.lineWrapping,
+      completion,
+      lintGutter(),
+      errorGutter(results),
+      inlineResults(results),
+    ],
     [results],
   )
 
