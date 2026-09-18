@@ -75,9 +75,15 @@ export function isCoherent(powers: UnitPowers): boolean {
   return true
 }
 
+/**
+ * One rule for every number in the app, so the document, the inline results and
+ * a table all agree. Scientific from a hundred thousand up, which is where a
+ * digit run stops being readable — 1.25e7 mm^3, never 12500000 mm^3 — and the
+ * same threshold a table column uses.
+ */
 export const formatNumber = (value: unknown, precision: number): string =>
   math
-    .format(value, { notation: 'auto', precision, lowerExp: -4, upperExp: 7 } as any)
+    .format(value, { notation: 'auto', precision, lowerExp: -4, upperExp: 5 } as any)
     .replace(/e\+/g, 'e')
 
 /** The unit a quantity should be displayed in, or null to let mathjs decide. */

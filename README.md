@@ -40,6 +40,12 @@ Deleting a sheet asks twice and then lands you on the sheet *above* it, so clear
 is press, confirm, press, confirm without the button moving under your hand. The last sheet
 in a project will not delete.
 
+The frame is fixed and the contents scroll inside it: the sidebar, the toolbar and an open
+panel stay put while the code and the document scroll on their own, each in its own pane.
+The button of an open panel stays outlined, so the toolbar says which one is showing.
+Handing the editor a definite height also hands scrolling to CodeMirror, which then renders
+only the lines in view — a 200-line sheet builds 41 lines of DOM instead of 201.
+
 The Help panel in the toolbar is the syntax reference, and adds a worked example sheet on
 request. The profile button at the foot of the sidebar holds your name — which goes in the
 title block of new projects — and says plainly what an account would be for, since there
@@ -84,7 +90,10 @@ Greek letters (`sigma`, `alpha`, `Delta`).
   symbolically with mathjs `derivative()`, then combined in quadrature (statistical) or as
   an absolute sum (worst case). Contribution shares are shares of variance in quadrature
   mode, so they sum to 100%.
-- `src/engine/tex.ts` — rendering. Variables italic, units upright, real subscripts.
+- `src/engine/tex.ts` — rendering. Variables italic, units upright, real subscripts. A
+  formatted number is carried into TeX exactly as it was formatted rather than re-rendered
+  by mathjs, which had a second opinion about notation — so a value and its ± never appear
+  in two different forms on the same line. Scientific notation starts at 1e5, everywhere.
 - `src/engine/sheet.ts` — the language: assignments, checks, function definitions, tables,
   plots, imports, forward-reference and redefinition warnings. Also the incremental cache:
   evaluation is strictly sequential, so everything above the first edited line is reused,

@@ -37,9 +37,20 @@ const seed = {
   lastBackupAt: Date.now() - 3 * 86400000,
 }
 
-await page.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), seed)
-await page.goto('http://localhost:4173/')
-await page.waitForSelector('.sheet-page')
+/**
+ * Seeding goes through an init script, which runs on every navigation — so a
+ * store written with page.evaluate() is wiped by the next reload unless the
+ * newest init script carries it. Every re-seed uses this.
+ */
+const seedWith = async (store) => {
+  await page.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), store)
+  await page.goto('http://localhost:4173/')
+  await page.reload()
+  await page.waitForSelector('.sheet-page')
+  await page.waitForTimeout(250)
+}
+
+await seedWith(seed)
 
 // 1. table columns share a unit and notation, with real superscripts
 const cells = await page.$$eval('.sheet-table tbody tr', (rows) =>
@@ -116,9 +127,7 @@ await page.waitForSelector('.panel')
 }
 
 // 7. package preview persists and numbers the sheets
-await page.evaluate((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), seed)
-await page.reload()
-await page.waitForSelector('.sheet-page')
+await seedWith(seed)
 await page.click('button:has-text("Project")')
 await page.waitForSelector('.panel')
 await page.click('button:has-text("Preview whole project")')
@@ -152,18 +161,16 @@ check('save failure banner', !!alert, alert ? (await alert.textContent()).slice(
 await page.evaluate(() => { Object.getPrototypeOf(localStorage).setItem = window.__realSet })
 
 // 9. stale dimming while a long sheet catches up, then clears
-await page.evaluate(() => localStorage.removeItem('longhand:store'))
-await page.reload()
-await page.waitForSelector('.sheet-page')
 const big = ['# Big', 'b = 300 mm +- 2 mm', 'h = 500 mm']
 for (let i = 0; i < 300; i += 1) big.push(`W${i} = b*h^2/${i + 6}`)
-await page.evaluate((src) => {
-  const s = JSON.parse(localStorage.getItem('longhand:store'))
-  s.projects[0].sheets[0].source = src
-  localStorage.setItem('longhand:store', JSON.stringify(s))
-}, big.join('\n'))
-await page.reload()
-await page.waitForSelector('.sheet-page')
+await seedWith({
+  ...seed,
+  projects: [{ ...seed.projects[0], sheets: [{ id: 'big', name: 'Big', source: big.join('\n') }] }],
+  activeSheetId: 'big',
+})
+check('the long sheet really is long',
+  (await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store'))))
+    .projects[0].sheets[0].source.split('\n').length === 303)
 await page.click('.cm-content')
 await page.keyboard.press('Control+Home')
 const t0 = Date.now()
@@ -175,9 +182,7 @@ check('typing not blocked on a 300-line sheet', typed < 600, `${typed}ms for 4 k
 check('stale clears once caught up', !stillStale)
 
 // 10. delete lands on the sheet above, so deleting several in a row is quick
-await page.evaluate((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), seed)
-await page.reload()
-await page.waitForSelector('.sheet-page')
+await seedWith(seed)
 {
   const active = async () => (await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store'))))
   const del = await page.$('.sheets-foot button:has-text("Delete")')
@@ -234,7 +239,91 @@ await page.waitForSelector('.panel.help')
   await page.click('button:has-text("Help")')
 }
 
-// 13. nothing clipped or overflowing, in either theme and at phone width
+// 13. the frame stays put: only the code and the document scroll
+{
+  const long = ['# Long sheet']
+  for (let i = 0; i < 200; i += 1) long.push(`x${i} = ${i} mm`)
+  await seedWith({
+    ...seed,
+    projects: [{ ...seed.projects[0], sheets: [{ id: 'l', name: 'Long', source: long.join('\n') }] }],
+    activeSheetId: 'l',
+  })
+  await page.click('button:has-text("Help")')
+  await page.waitForTimeout(400)
+
+  const pageScrolls = await page.evaluate(() =>
+    document.documentElement.scrollHeight > document.documentElement.clientHeight + 1)
+  check('the page itself never scrolls', !pageScrolls)
+
+  const box = (selector) => page.$eval(selector, (e) => Math.round(e.getBoundingClientRect().top))
+  const before = { toolbar: await box('.toolbar'), panel: await box('.panel'), sheets: await box('.sheets') }
+  const scrolled = await page.evaluate(() => {
+    // whichever element actually holds the overflow
+    const scroller = [...document.querySelectorAll('.editor, .editor .cm-scroller')]
+      .find((e) => e.scrollHeight > e.clientHeight + 1)
+    if (!scroller) return 'nothing in the editor scrolls'
+    scroller.scrollTop = 600
+    return scroller.scrollTop
+  })
+  await page.waitForTimeout(250)
+  const after = { toolbar: await box('.toolbar'), panel: await box('.panel'), sheets: await box('.sheets') }
+  check('the code scrolls', scrolled === 600, `${scrolled}`)
+  check('the toolbar, panel and sidebar stay put', JSON.stringify(before) === JSON.stringify(after),
+    `${JSON.stringify(before)} -> ${JSON.stringify(after)}`)
+
+  // the document pane scrolls on its own, without moving anything else
+  const docScrolled = await page.evaluate(() => {
+    const pane = document.querySelector('.output-pane')
+    if (pane.scrollHeight <= pane.clientHeight + 1) return 'the document pane does not scroll'
+    pane.scrollTop = 400
+    return pane.scrollTop
+  })
+  await page.waitForTimeout(200)
+  check('the document scrolls on its own', docScrolled === 400, `${docScrolled}`)
+  check('and still nothing else moved', (await box('.toolbar')) === before.toolbar)
+
+  // an open panel keeps its button outlined once the mouse has left it
+  await page.mouse.move(5, 5)
+  await page.waitForTimeout(150)
+  const lit = await page.$$eval('.toolbar button', (els) =>
+    els.filter((e) => e.classList.contains('on')).map((e) => ({
+      text: e.textContent.trim(),
+      border: getComputedStyle(e).borderTopColor,
+      background: getComputedStyle(e).backgroundColor,
+    })))
+  check('the open tab stays outlined with the mouse away',
+    lit.length === 1 && lit[0].text === 'Help' &&
+      lit[0].border !== 'rgba(0, 0, 0, 0)' && lit[0].background !== 'rgba(0, 0, 0, 0)',
+    JSON.stringify(lit))
+  await page.click('button:has-text("Help")')
+  check('pressing it again puts it out', (await page.$$('.toolbar button.on')).length === 0)
+}
+
+// 14. printing is not clipped by the fixed frame
+{
+  await page.emulateMedia({ media: 'print' })
+  await page.waitForTimeout(300)
+  const printed = await page.evaluate(() => {
+    const app = document.querySelector('.app')
+    const style = getComputedStyle(app)
+    return {
+      overflow: style.overflow,
+      editorHidden: getComputedStyle(document.querySelector('.editor-pane')).display === 'none',
+      sidebarHidden: getComputedStyle(document.querySelector('.sheets')).display === 'none',
+      // the whole document has to be laid out, not cut at one screen
+      appHeight: Math.round(app.getBoundingClientRect().height),
+      docHeight: document.querySelector('.sheet-page').getBoundingClientRect().height,
+    }
+  })
+  check('printing releases the fixed frame', printed.overflow === 'visible', printed.overflow)
+  check('printing hides the editor and sidebar', printed.editorHidden && printed.sidebarHidden)
+  check('the whole document is laid out for print',
+    printed.appHeight >= printed.docHeight - 2 && printed.appHeight > 1000,
+    `app ${printed.appHeight}px, document ${Math.round(printed.docHeight)}px`)
+  await page.emulateMedia({ media: 'screen' })
+}
+
+// 15. nothing clipped or overflowing, in either theme and at phone width
 for (const [theme, width, height, tag] of [
   ['light', 1400, 900, 'light'],
   ['dark', 1400, 900, 'dark'],

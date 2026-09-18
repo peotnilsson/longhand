@@ -138,10 +138,28 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/**
+ * The frame is fixed and the contents scroll inside it: sidebar, toolbar and an
+ * open panel stay where they are while the code and the document scroll on
+ * their own, the way two panes of one document should behave.
+ *
+ * `minmax(0, 1fr)` on the row and `min-height: 0` on each region are what make
+ * that true — without them a tall pane grows the grid row past the window and
+ * the whole page scrolls, taking the toolbar with it.
+ */
 .app {
   display: grid;
   grid-template-columns: 176px minmax(360px, 38%) 1fr;
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.sheets,
+.editor-pane,
+.output-pane {
+  min-height: 0;
 }
 
 /* ---------------------------------------------------------- sheets sidebar */
@@ -149,8 +167,15 @@ body {
 .sheets {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   border-right: 1px solid var(--rule);
   background: var(--shade);
+}
+
+.sheets-head,
+.sheets-foot,
+.profile-button {
+  flex: 0 0 auto;
 }
 
 .sheets-head {
@@ -166,9 +191,11 @@ body {
 }
 
 .tree {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0 8px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .project {
@@ -269,6 +296,14 @@ body {
   background: var(--hover);
 }
 
+/* An open panel keeps its button outlined, so the toolbar says which one is
+   showing after the mouse has moved away. */
+.toolbar button.on {
+  color: var(--ink);
+  background: var(--hover);
+  border-color: var(--rule-strong);
+}
+
 .sheets-foot button {
   flex: 1 1 auto;
   min-width: 0;
@@ -303,11 +338,13 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   border-right: 1px solid var(--rule);
   background: var(--panel);
 }
 
 .toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -362,9 +399,15 @@ body {
 }
 
 .panel {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 22px;
+  /* An open panel keeps its place below the toolbar and scrolls on its own
+     rather than pushing the editor off the screen. */
+  max-height: 52vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px 18px 20px;
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
@@ -427,11 +470,6 @@ body {
 
 /* The reference is two columns on a wide screen and one on a narrow one: a
    syntax example is only useful next to what it means. */
-.panel.help {
-  max-height: 62vh;
-  overflow-y: auto;
-}
-
 .panel .syntax {
   display: flex;
   flex-direction: column;
@@ -485,15 +523,20 @@ body {
   text-align: left;
   color: var(--muted);
   background: transparent;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
 }
 
-.profile-button:hover,
+.profile-button:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
 .profile-button.on {
   color: var(--ink);
   background: var(--hover);
+  border-color: var(--rule-strong);
 }
 
 .avatar {
@@ -547,10 +590,24 @@ body {
 }
 
 .editor {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  /* CodeMirror's own scroller does the scrolling — see below. */
+  overflow: hidden;
+}
+
+/* Giving the editor a definite height hands scrolling to CodeMirror, which
+   then only renders the lines in view: a 600-line sheet builds a screenful of
+   DOM instead of 5,600 pixels of it. Without it the wrapper scrolls and
+   CodeMirror lays out every line. */
+.editor .cm-editor {
+  height: 100%;
+}
+
+.editor .cm-scroller {
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 /* Without this the editor's content width sets the grid's width, and a long
@@ -946,6 +1003,7 @@ body {
   .app {
     display: block;
     height: auto;
+    overflow: visible;
   }
 
   .sheets,
@@ -1003,7 +1061,7 @@ body {
 @media (max-width: 900px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto 40vh 1fr;
+    grid-template-rows: auto minmax(0, 40vh) minmax(0, 1fr);
   }
 
   .sheets {
@@ -1027,8 +1085,8 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .panel.help {
-    max-height: 50vh;
+  .panel {
+    max-height: 42vh;
   }
 
   .editor-pane {

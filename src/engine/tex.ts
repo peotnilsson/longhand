@@ -45,13 +45,40 @@ export const toTex = (node: MathNode, scope: Record<string, unknown>): string =>
     } as any),
   )
 
-/** Render an already-formatted value string ("250 kN*m") as TeX. */
+/**
+ * Render an already-formatted value string ("250 kN*m") as TeX.
+ *
+ * The number is kept exactly as it was formatted. Handing it back to mathjs to
+ * re-render would give a second opinion on notation — it turns 9375000 into
+ * 9.375e6 while our own formatter leaves it plain — and a value printed one way
+ * beside its own ± printed the other is the kind of thing a reviewer stops at.
+ */
 export function valueToTex(formatted: string, scope: Record<string, unknown>): string {
+  const match = formatted.match(/^(-?[\d.]+(?:e[+-]?\d+)?)(\s+(.*))?$/)
+  if (match) {
+    const [, number, , unit] = match
+    const tex = numberToTex(number)
+    if (!unit) return tex
+    try {
+      // the unit alone through mathjs, which knows how to set it upright
+      return `${tex}~${toTex(math.parse(`1 ${unit}`), scope).replace(/^1~?/, '')}`
+    } catch {
+      return `${tex}~\\mathrm{${unit}}`
+    }
+  }
   try {
     return toTex(math.parse(formatted), scope)
   } catch {
     return `\\text{${formatted}}`
   }
+}
+
+/** "1.25e7" -> 1.25 \cdot 10^{7}, anything else unchanged. */
+const numberToTex = (number: string): string => {
+  const exponential = number.match(/^(-?[\d.]+)e([+-]?\d+)$/)
+  if (!exponential) return number
+  const [, mantissa, exponent] = exponential
+  return `${mantissa} \\cdot 10^{${Number(exponent)}}`
 }
 
 /** Two stages are "the same" if they differ only in spacing or multiplication dots. */
