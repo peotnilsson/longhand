@@ -43,70 +43,6 @@ export const REFERENCE: Section[] = [
       'One line at a time, top to bottom. A line is an assignment, a check, a function, a table, a heading or a note — and a symbol means whatever the line above said it means.',
     entries: [
       {
-        id: 'value',
-        code: 'b = 300 mm',
-        summary: 'A value with a unit.',
-        detail:
-          'Any unit mathjs knows works: mm, m, kN, MPa, kg, s, K, degC, l, W, and the SI prefixes on all of them. A number on its own is fine too — a factor of 1.35 has no units and does not need any.',
-        example: 'b = 300 mm\nn = 1.35\n',
-        keywords: ['assignment', 'variable', 'unit', 'mm', 'kN', 'MPa'],
-      },
-      {
-        id: 'formula',
-        code: 'W = b*h^2/6',
-        summary: 'A formula built from values above it.',
-        detail:
-          'This is the line that makes the tool worth using: it renders as the symbolic formula, then the same formula with your numbers substituted in, then the result. That middle step is what makes a calculation checkable by eye — a reviewer can see the numbers that went in without recomputing anything.',
-        example: 'b = 300 mm\nh = 500 mm\nW = b*h^2/6\n',
-        keywords: ['formula', 'expression', 'substitution', 'symbolic'],
-      },
-      {
-        id: 'display-unit',
-        code: 'sigma = M/W  -> MPa',
-        summary: 'The arrow forces the unit the result is shown in.',
-        detail:
-          'Without it the result is shown in the units it was built from. With it you get the unit you asked for, and an error if that unit is the wrong kind of quantity — a length cannot be shown in MPa, and saying so is more useful than a number that looks fine.',
-        example: 'M = 250 kN*m\nW = 1.25e7 mm^3\nsigma = M/W  -> MPa\n',
-        keywords: ['arrow', 'convert', 'display unit', 'show in'],
-      },
-      {
-        id: 'tolerance',
-        code: 'b = 300 mm +- 2 mm',
-        summary: 'A value with an uncertainty, which propagates downwards.',
-        detail:
-          'Write ± if you prefer; +- is easier to type. Every result that depends on this value gets a ± of its own, worked out from the partial derivatives of your own formula, and results with more than one uncertain input also show which input each share of the uncertainty came from. Settings chooses between combining them statistically (in quadrature, the usual assumption) and worst case (straight sum, the pessimistic bound). The shares are attributed to the quantities named on that line, so to see which original measurement dominates, look at the line where those measurements were combined.',
-        example: 'b = 300 mm +- 2 mm\nh = 500 mm +- 3 mm\nW = b*h^2/6\n',
-        keywords: ['tolerance', 'uncertainty', 'error', 'propagation', 'plus minus', '±'],
-      },
-      {
-        id: 'check',
-        code: 'sigma <= f_ck',
-        summary: 'A check: renders as OK or NOT OK with the margin.',
-        detail:
-          'Also >=, <, >, == and !=. The verdict shows how much room is left — "33.3% spare" — or how far over it is, which is the number you actually report. A check is a line of its own and assigns nothing.',
-        example: 'sigma = 20 MPa\nf_ck = 30 MPa\nsigma <= f_ck\n',
-        keywords: ['check', 'verify', 'limit', 'OK', 'NOT OK', 'margin', 'utilisation'],
-      },
-      {
-        id: 'function',
-        code: 'A(d) = pi*d^2/4',
-        summary: 'Your own function, called like any other.',
-        detail:
-          'Call it with units — A(20 mm) — and it keeps them. Useful when the same expression appears three times in a sheet and you want one place to be wrong.',
-        example: 'A(d) = pi*d^2/4\nA_bar = A(20 mm)\n',
-        keywords: ['function', 'definition', 'reuse'],
-      },
-      {
-        id: 'solve',
-        code: 'b_req = solve sigma = f_ck for b',
-        summary: 'The reverse question: what value of b makes the two sides equal?',
-        detail:
-          'Not "what stress does this section give" but "what section do I need". Nothing symbolic happens: it tries a value of b, re-runs the lines that depend on it, and closes in until the two sides meet — so it works through any number of intermediate steps and in whatever unit b carries. Add "from 100 mm to 900 mm" when it needs telling where to look, which is also how you pick between two roots. If the two sides never cross it says so instead of returning a number.',
-        example:
-          'M = 250 kN*m\nf_ck = 30 MPa\nh = 500 mm\nb = 300 mm\nW = b*h^2/6\nsigma = M/W\nb_req = solve sigma = f_ck for b\n',
-        keywords: ['solve', 'goal seek', 'root', 'inverse', 'required', 'back calculate', 'for'],
-      },
-      {
         id: 'heading',
         code: '# Heading',
         summary: 'A heading. The first one becomes the sheet title.',
@@ -129,7 +65,7 @@ export const REFERENCE: Section[] = [
 
   {
     id: 'tables',
-    title: 'Many cases at once',
+    title: 'Data visualization',
     blurb:
       'A table checks ten sections in the space of one, and a named table becomes data the rest of the sheet can read.',
     entries: [
@@ -140,7 +76,7 @@ export const REFERENCE: Section[] = [
         detail:
           'The first row is the header. A header cell containing an = is a computed column: its formula runs for every row, using that row\'s own values. A computed column holding a comparison prints OK or NOT OK per row. Every column is formatted as a whole, so a column shares one unit, one notation and one number of decimals.',
         example:
-          'M_Ed = 250 kN*m\nf_ck = 30 MPa\n\ntable\n  section | bw     | hw     | Wt = bw*hw^2/6 | ok = M_Ed/Wt <= f_ck\n  A       | 300 mm | 500 mm\n  B       | 250 mm | 450 mm\nend\n',
+          'M_Ed = 250 kN*m\nf_c = 30 MPa\n\ntable\n  section | bw     | hw     | Wt = bw*hw^2/6 | ok = M_Ed/Wt <= f_c\n  A       | 300 mm | 500 mm\n  B       | 250 mm | 450 mm\nend\n',
         keywords: ['table', 'rows', 'cases', 'sections', 'batch'],
       },
       {
@@ -205,6 +141,79 @@ export const REFERENCE: Section[] = [
   },
 
   {
+    id: 'algebra',
+    title: 'Algebraic structures',
+    blurb:
+      'Assign values with real-world units, build checkable formulas, propagate uncertainties automatically, and isolate required variables by solving equations in reverse.',
+    entries: [    
+      {
+        id: 'value',
+        code: 'b = 300 mm',
+        summary: 'A value with a unit.',
+        detail:
+          'Any unit mathjs knows works: mm, m, kN, MPa, kg, s, K, degC, l, W, and the SI prefixes on all of them. A number on its own is fine too — a factor of 1.35 has no units and does not need any.',
+        example: 'b = 300 mm\nn = 1.35\n',
+        keywords: ['assignment', 'variable', 'unit', 'value', 'mm', 'kN', 'MPa'],
+      },
+      {
+        id: 'formula',
+        code: 'W = a*h^2/6',
+        summary: 'A formula built from values above it.',
+        detail:
+          'This is the line that makes the tool worth using: it renders as the symbolic formula, then the same formula with your numbers substituted in, then the result. That middle step is what makes a calculation checkable by eye — a reviewer can see the numbers that went in without recomputing anything.',
+        example: 'b = 300 mm\nh = 500 mm\nW = b*h^2/6\n',
+        keywords: ['formula', 'values', 'expression', 'substitution', 'symbolic'],
+      },
+      {
+        id: 'display-unit',
+        code: 'sigma = M/W  -> MPa',
+        summary: 'The arrow forces the unit the result is shown in.',
+        detail:
+          'Without it the result is shown in the units it was built from. With it you get the unit you asked for, and an error if that unit is the wrong kind of quantity — a length cannot be shown in MPa, and saying so is more useful than a number that looks fine.',
+        example: 'M = 250 kN*m\nW = 1.25e7 mm^3\nsigma = M/W  -> MPa\n',
+        keywords: ['arrow', 'convert', 'unit', 'convert', 'display unit', 'show in'],
+      },
+      {
+        id: 'tolerance',
+        code: 'b = 300 mm +- 2 mm',
+        summary: 'A value with an uncertainty, which propagates downwards.',
+        detail:
+          'Write ± if you prefer; +- is easier to type. Every result that depends on this value gets a ± of its own, worked out from the partial derivatives of your own formula, and results with more than one uncertain input also show which input each share of the uncertainty came from. Settings chooses between combining them statistically (in quadrature, the usual assumption) and worst case (straight sum, the pessimistic bound). The shares are attributed to the quantities named on that line, so to see which original measurement dominates, look at the line where those measurements were combined.',
+        example: 'b = 300 mm +- 2 mm\nh = 500 mm +- 3 mm\nW = b*h^2/6\n',
+        keywords: ['tolerance', 'uncertainty', 'error', 'propagation', 'plus minus', '±'],
+      },
+      {
+        id: 'check',
+        code: 'sigma <= f_c',
+        summary: 'A check: renders as OK or NOT OK with the margin.',
+        detail:
+          'Also >=, <, >, == and !=. The verdict shows how much room is left — "33.3% spare" — or how far over it is, which is the number you actually report. A check is a line of its own and assigns nothing.',
+        example: 'sigma = 20 MPa\nf_c = 30 MPa\nsigma <= f_c\n',
+        keywords: ['check', 'verify','spare', 'limit', 'OK', 'NOT OK', 'margin', 'utilisation'],
+      },
+      {
+        id: 'function',
+        code: 'A(r) = pi*r^2',
+        summary: 'Your own function, called like any other.',
+        detail:
+          'Call it with units, or values — A(20 mm), A(b) — and it keeps them. Useful when the same expression appears three times in a sheet and you want one place to be wrong.',
+        example: 'A(r) = pi*r^2\nA_bar = A(20 mm)\n \nb = 300 mm\nA_bValue = A(b)',
+        keywords: ['function', 'definition', 'reuse', 'variable', 'parameter'],
+      },
+      {
+        id: 'solve',
+        code: 'b_req = solve sigma = f_c for b',
+        summary: 'The reverse question: what value of b makes the two sides equal?',
+        detail:
+          'Not "what stress does this section give" but "what section do I need". Nothing symbolic happens: it tries a value of b, re-runs the lines that depend on it, and closes in until the two sides meet — so it works through any number of intermediate steps and in whatever unit b carries. Add "from 100 mm to 900 mm" when it needs telling where to look, which is also how you pick between two roots. If the two sides never cross it says so instead of returning a number.',
+        example:
+          'M = 250 kN*m\nf_c = 30 MPa\nh = 500 mm\nb = 300 mm\nW = b*h^2/6\nsigma = M/W\nb_req = solve sigma = f_c for b\n',
+        keywords: ['solve', 'goal seek', 'root', 'inverse', 'required', 'back calculate', 'for'],
+      },
+    ],
+  },
+
+  {
     id: 'units',
     title: 'Units and numbers',
     prose: [
@@ -233,7 +242,7 @@ export const REFERENCE: Section[] = [
 
   {
     id: 'errors',
-    title: 'When a line will not compute',
+    title: 'Errors',
     blurb: 'What each message means, and what to do about it.',
     entries: [
       {
@@ -331,7 +340,7 @@ export const REFERENCE: Section[] = [
 
   {
     id: 'keyboard',
-    title: 'Keyboard',
+    title: 'Keyboard shortcuts',
     entries: [
       { id: 'k-new', code: 'Alt + N', summary: 'New sheet in this project.' },
       { id: 'k-move', code: 'Alt + [ / ]', summary: 'Previous / next sheet.' },
