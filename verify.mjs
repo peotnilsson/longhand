@@ -31,7 +31,29 @@ const bundled = '/opt/pw-browsers/chromium'
 const browser = await chromium.launch(
   existsSync(bundled) ? { executablePath: bundled } : { channel: 'chromium' },
 )
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+/**
+ * Every page in this pass, with the counting script blocked.
+ *
+ * The suite must not depend on a third party being reachable. plausible.io is
+ * fine from a laptop and fine from a runner most of the time, and "most of the
+ * time" is exactly what a test cannot be built on: a deferred script that
+ * never answers holds up the load event, and a reload that never finishes
+ * loading looks identical to an app that failed to start.
+ *
+ * Aborting the request still fires Playwright's `request` event, so the checks
+ * that care about what the page asks for — that it asks for the counter, and
+ * that no request anywhere carries a calculation — still see it.
+ */
+const openPage = async (options) => {
+  const fresh = await browser.newPage(options)
+  await fresh.route(/plausible\.io/, (route) => route.abort())
+  return fresh
+}
+
+const page = await openPage({ viewport: { width: 1400, height: 900 } })
+// A shared runner is several times slower than a laptop, and a slow app is not
+// a broken one. Thirty seconds was enough here and not on a runner.
+page.setDefaultTimeout(45_000)
 page.on('pageerror', (e) => bad.push('PAGE ERROR: ' + e.message))
 /**
  * The counting script is third-party and optional: an ad blocker, an offline
@@ -592,7 +614,7 @@ await seedWith(seed)
 
 // 19. the landing page
 {
-  const landing = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const landing = await openPage({ viewport: { width: 1400, height: 900 } })
   const problems = []
   landing.on('pageerror', (error) => problems.push(String(error)))
   const responses = new Map()
@@ -705,7 +727,7 @@ await seedWith(seed)
 
 // 20. the help page
 {
-  const docs = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const docs = await openPage({ viewport: { width: 1400, height: 900 } })
   const problems = []
   docs.on('pageerror', (error) => problems.push(String(error)))
   await docs.goto('http://localhost:4173/docs')
@@ -828,7 +850,7 @@ await seedWith(seed)
 
 // 21. an example opens in the app, once
 {
-  const opened = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const opened = await openPage({ viewport: { width: 1400, height: 900 } })
   await opened.goto('http://localhost:4173/app?example=pump')
   await opened.waitForSelector('.sheet-page')
   await opened.waitForTimeout(600)
@@ -858,7 +880,7 @@ await seedWith(seed)
 
 // 22. the Help button leaves for the reference
 {
-  const app = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const app = await openPage({ viewport: { width: 1400, height: 900 } })
   await app.goto('http://localhost:4173/app')
   await app.waitForSelector('.sheet-page')
   check('app: the mark is in the sidebar',
@@ -876,7 +898,7 @@ for (const [theme, width, height, tag] of [
   ['dark', 1400, 900, 'dark'],
   ['light', 390, 780, 'phone'],
 ]) {
-  const view = await browser.newPage({ viewport: { width, height }, colorScheme: theme })
+  const view = await openPage({ viewport: { width, height }, colorScheme: theme })
   await view.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)),
     { ...seed, settings: { ...seed.settings, theme } })
   await view.goto('http://localhost:4173/app')
@@ -948,7 +970,7 @@ for (const [theme, width, height, tag] of [
   check('share: nothing is in the query string', !url.includes('?'), url.slice(0, 80))
   check('share: it is short enough to send', url.length < 4000, `${url.length} characters`)
 
-  const reader = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const reader = await openPage({ viewport: { width: 1400, height: 900 } })
   const requests = []
   reader.on('request', (request) => requests.push(request.url()))
   await reader.goto(url)
@@ -1019,7 +1041,7 @@ for (const [theme, width, height, tag] of [
 
 // 30. the verification page runs the suite in the browser
 {
-  const verification = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const verification = await openPage({ viewport: { width: 1400, height: 900 } })
   verification.on('pageerror', (e) => bad.push('VERIFICATION PAGE ERROR: ' + e.message))
   await verification.goto('http://localhost:4173/verification')
   await verification.waitForSelector('.scoreboard')
@@ -1043,7 +1065,7 @@ for (const [theme, width, height, tag] of [
 
 // 31. the privacy page exists and is linked from everywhere it should be
 {
-  const privacy = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const privacy = await openPage({ viewport: { width: 1400, height: 900 } })
   privacy.on('pageerror', (e) => bad.push('PRIVACY PAGE ERROR: ' + e.message))
   await privacy.goto('http://localhost:4173/privacy')
   await privacy.waitForSelector('.privacy')
@@ -1055,7 +1077,7 @@ for (const [theme, width, height, tag] of [
   check('privacy: it states what Longhand is not', /calculation aid/.test(words))
 
   for (const [page_, where] of [['/', 'landing'], ['/docs', 'reference'], ['/verification', 'verification']]) {
-    const other = await browser.newPage()
+    const other = await openPage()
     await other.goto('http://localhost:4173' + page_)
     await other.waitForTimeout(200)
     const links = await other.$$eval('a', (as) => as.map((a) => a.getAttribute('href')))
@@ -1075,7 +1097,7 @@ for (const [theme, width, height, tag] of [
 
 // 32. the counting script is there, and it never sees a calculation
 {
-  const clean = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const clean = await openPage({ viewport: { width: 1400, height: 900 } })
   const outgoing = []
   clean.on('request', (request) => {
     const url = request.url()
