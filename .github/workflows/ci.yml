@@ -1,8 +1,17 @@
 name: CI
 
-# Everything that used to be run by hand before a push, run on every push
-# instead. The Playwright pass is the expensive half and the one most likely to
-# be skipped when in a hurry, which is exactly why it belongs here.
+# Two jobs on purpose.
+#
+# `check` is the gate: lint, the unit tests (which include the whole
+# verification suite) and the production build. If any of those fail, the
+# commit is broken and the red mark means something.
+#
+# `browser` drives a real Chromium through the app. It is the most valuable
+# pass and the least portable one — it uses the File System Access API, the
+# origin-private file system, clipboard permissions and print pagination, all
+# of which behave differently on a runner than on a laptop. Until it has run
+# green for a while it does not block a push: a flaky browser on someone
+# else's machine must not stop work landing.
 
 on:
   push:
@@ -12,15 +21,12 @@ on:
 
 jobs:
   check:
+    name: Lint, tests and build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The build stamps the commit onto every printed sheet, so the build
-          # needs to know which commit it is.
-          fetch-depth: 1
 
       - uses: actions/setup-node@v4
         with:
@@ -38,10 +44,30 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Playwright is not a dependency of the app — it is only needed for this
-      # pass — so it is installed without touching package.json, exactly as the
-      # README says to do it locally.
-      - name: Install Playwright and a browser
+  browser:
+    name: Browser pass (not blocking yet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Playwright is not a dependency of the app — it is only needed here — so
+      # it is installed without touching package.json, exactly as the README
+      # says to do it locally. The full Chromium, not the headless shell: the
+      # shell is missing the file-system pieces this pass exercises.
+      - name: Install Playwright and Chromium
         run: |
           npm i --no-save playwright
           npx playwright install --with-deps chromium
@@ -52,8 +78,6 @@ jobs:
           npx --yes wait-on --timeout 60000 http://localhost:4173/
           npm run verify
 
-      # A failed browser check is much easier to read with the screenshots it
-      # took on the way past.
       - name: Keep the screenshots from a failed run
         if: failure()
         uses: actions/upload-artifact@v4

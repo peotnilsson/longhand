@@ -20,8 +20,16 @@ const check = (name, pass, detail = '') => (pass ? ok : bad).push(`${name}${deta
  * browser everywhere else.
  */
 const bundled = '/opt/pw-browsers/chromium'
+/**
+ * The full browser, not the headless shell.
+ *
+ * Playwright now launches chrome-headless-shell by default, which is a smaller
+ * build with pieces missing — and this pass exercises the File System Access
+ * API and the origin-private file system, which are exactly the sort of thing
+ * it does not carry. `channel: 'chromium'` asks for the real one.
+ */
 const browser = await chromium.launch(
-  existsSync(bundled) ? { executablePath: bundled } : {},
+  existsSync(bundled) ? { executablePath: bundled } : { channel: 'chromium' },
 )
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
 page.on('pageerror', (e) => bad.push('PAGE ERROR: ' + e.message))
@@ -72,6 +80,29 @@ await page.addInitScript(() => {
   window.showSaveFilePicker = open
   window.showOpenFilePicker = async () => [await open()]
   window.__readDisk = async () => (await (await open()).getFile()).text()
+})
+
+/**
+ * When something times out waiting for an element, the useful question is what
+ * the page was showing instead — an error boundary, a blank body, a half-built
+ * frame. Playwright's own message does not say, and in CI there is nobody at
+ * the keyboard to go and look.
+ */
+process.on('uncaughtException', (error) => {
+  void (async () => {
+    let seen = ''
+    try {
+      seen = (await page.evaluate(() => document.body.innerText)).trim().slice(0, 700)
+    } catch {
+      seen = '(the page could not be read at all)'
+    }
+    console.error('\n--- what the page was showing ---\n' + (seen || '(empty body)'))
+    console.error('\n--- the error ---')
+    console.error(error)
+    console.log('PASS:'); ok.forEach((l) => console.log('  ✓ ' + l))
+    console.log('FAIL:'); bad.forEach((l) => console.log('  ✗ ' + l))
+    process.exit(1)
+  })()
 })
 
 const seedWith = async (store) => {
