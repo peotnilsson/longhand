@@ -10,9 +10,17 @@ import {
 } from '@codemirror/view'
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
-import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
+import {
+  autocompletion,
+  snippetCompletion,
+  startCompletion,
+  type CompletionContext,
+} from '@codemirror/autocomplete'
+import { keymap } from '@codemirror/view'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
 import { BUILTIN_NAMES, unitNames, type Line } from './engine'
+import { filterPalette, paletteAt } from './palette'
+import { track } from './analytics'
 
 const KEYWORDS = ['table', 'end', 'plot', 'import', 'solve', 'for', 'vs', 'from', 'to']
 
@@ -162,8 +170,66 @@ const errorGutter = (results: Line[]) =>
     return diagnostics
   })
 
+
+/**
+ * The `/` palette: every construct in the language, one keystroke from an
+ * empty line.
+ *
+ * It only offers itself where a new line could begin, so a division sign in
+ * the middle of a formula is left alone and `//` — a comment — is not a
+ * palette at all, because the second slash is not a letter.
+ *
+ * Choosing an item inserts a snippet with tab-through fields, which is the
+ * part that matters: seeing `interp2` in a list tells you it exists, and
+ * getting its five arguments laid out in order tells you how to use it
+ * without leaving the sheet.
+ */
+const paletteSource = (context: CompletionContext) => {
+  const line = context.state.doc.lineAt(context.pos)
+  const before = line.text.slice(0, context.pos - line.from)
+  const at = paletteAt(before)
+  if (!at) return null
+
+  // Our own filtering rather than CodeMirror's, which only ever sees the
+  // label: "/goal seek" has to find solve, and the words that make that work
+  // are in the documentation, not in the name.
+  const shown = filterPalette(at.query)
+
+  return {
+    from: line.from + at.from,
+    filter: false,
+    options: shown.map((item, index) => {
+      const option = snippetCompletion(item.template, {
+        label: `/${item.label}`,
+        info: item.summary,
+        type: 'keyword',
+        // Reading order, not alphabetical: the palette is the reference page
+        // with the prose taken out, and that order was chosen for a reason.
+        boost: shown.length - index,
+      })
+      const insert = option.apply as (
+        view: EditorView,
+        completion: typeof option,
+        from: number,
+        to: number,
+      ) => void
+      // Counted without saying which one: whether the palette is used at all
+      // is the question, and a construct name is closer to the sheet than
+      // anything else we send.
+      return {
+        ...option,
+        apply: (view: EditorView, completion: typeof option, from: number, to: number) => {
+          track('palette used')
+          insert(view, completion, from, to)
+        },
+      }
+    }),
+  }
+}
+
 const completion = autocompletion({
   override: [
+    paletteSource,
     (context: CompletionContext) => {
       const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_]*$/)
       if (!word || (word.from === word.to && !context.explicit)) return null
@@ -186,6 +252,22 @@ const completion = autocompletion({
     },
   ],
 })
+
+/** Ctrl/Cmd-Enter opens the palette wherever the cursor is, slash or not. */
+const paletteKeys = keymap.of([
+  {
+    key: 'Mod-Enter',
+    run: (view) => {
+      const line = view.state.doc.lineAt(view.state.selection.main.head)
+      const before = line.text.slice(0, view.state.selection.main.head - line.from)
+      if (!/^\s*$/.test(before)) return false
+      view.dispatch({ changes: { from: view.state.selection.main.head, insert: '/' },
+        selection: { anchor: view.state.selection.main.head + 1 } })
+      startCompletion(view)
+      return true
+    },
+  },
+])
 
 /**
  * Restrained but real colour: enough to tell a unit from a variable at a
@@ -262,6 +344,7 @@ export function Editor({
       // unwrapped line widens the whole grid past a phone viewport.
       EditorView.lineWrapping,
       completion,
+      paletteKeys,
       lintGutter(),
       errorGutter(results),
       inlineResults(results),

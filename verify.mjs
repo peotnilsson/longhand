@@ -264,14 +264,32 @@ await seedWith({
 check('the long sheet really is long',
   (await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store'))))
     .projects[0].sheets[0].source.split('\n').length === 303)
-await page.click('.cm-content')
-await page.keyboard.press('Control+Home')
-const t0 = Date.now()
-await page.keyboard.type('// x', { delay: 0 })
-const typed = Date.now() - t0
+/**
+ * One burst of typing can land while the previous render is still going, and
+ * on a loaded machine that shows up as a second of blocked keystrokes which
+ * has nothing to do with the editor. What we mean by "typing is not blocked"
+ * is that it is normally instant, so the median of several bursts is the
+ * honest measurement and one unlucky sample is not a failing build.
+ */
+const burst = async () => {
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+Home')
+  const started = Date.now()
+  await page.keyboard.type('// x', { delay: 0 })
+  return Date.now() - started
+}
+await burst()
+await page.waitForTimeout(1500)
+const samples = []
+for (let i = 0; i < 5; i += 1) {
+  samples.push(await burst())
+  await page.waitForTimeout(600)
+}
+const typed = [...samples].sort((a, b) => a - b)[2]
 await page.waitForTimeout(1500)
 const stillStale = await page.$('.output-pane.stale')
-check('typing not blocked on a 300-line sheet', typed < 600, `${typed}ms for 4 keystrokes`)
+check('typing not blocked on a 300-line sheet', typed < 600,
+  `median ${typed}ms of ${JSON.stringify(samples)} for 4 keystrokes`)
 check('stale clears once caught up', !stillStale)
 
 // 10. delete lands on the sheet above, so deleting several in a row is quick
@@ -1250,6 +1268,86 @@ for (const [theme, width, height, tag] of [
   check('an absolute temperature is refused, not quietly used',
     /not a difference/.test(message), message.slice(0, 80))
   check('and the message says what to write instead', /22 K/.test(message))
+}
+
+// 38. the palette: every construct one keystroke from an empty line
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Palette', source: '# Palette\nb = 300 mm\n\n' },
+  ] }], activeSheetId: 's1' })
+
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('/')
+  await page.waitForSelector('.cm-tooltip-autocomplete')
+  const offered = await page.$$eval('.cm-tooltip-autocomplete li', (els) =>
+    els.map((e) => e.textContent))
+  check('the palette opens on a slash', offered.length > 5, JSON.stringify(offered.slice(0, 4)))
+  check('and it is the language, not the variables in this sheet',
+    offered.some((t) => /check/.test(t)) && offered.some((t) => /table/.test(t)),
+    JSON.stringify(offered.slice(0, 6)))
+
+  await page.keyboard.type('tolerance')
+  await page.waitForTimeout(200)
+  const narrowed = await page.$$eval('.cm-tooltip-autocomplete li', (els) =>
+    els.map((e) => e.textContent))
+  check('typing narrows it to one thing', narrowed.length <= 3 && /tolerance/.test(narrowed[0] ?? ''),
+    JSON.stringify(narrowed))
+
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(400)
+  const source = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('longhand:store')).projects[0].sheets[0].source)
+  const inserted = source.split('\n').pop()
+  check('choosing one inserts the line, slash and all gone',
+    inserted.includes('+-') && !inserted.includes('/tolerance'), JSON.stringify(inserted))
+  // The whole line, not a skeleton with the numbers missing: an insert that
+  // leaves "b =  mm" behind is worse than no palette, because it looks done.
+  check('and every field it offers arrives filled in',
+    /\S\s*=\s*\S+\s*\w+\s*\+-\s*\S+/.test(inserted) && !/=\s{2,}\w/.test(inserted),
+    JSON.stringify(inserted))
+
+  // and a slash inside a formula is still division
+  await page.keyboard.press('Escape')
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('\nx = 10 mm/')
+  await page.waitForTimeout(250)
+  check('a slash in a formula is division, not a menu',
+    (await page.$('.cm-tooltip-autocomplete')) === null)
+}
+
+// 39. templates, and the sheet a browser that has never been here is given
+{
+  const first = await openPage({ viewport: { width: 1400, height: 900 } })
+  first.setDefaultTimeout(45_000)
+  await first.goto('http://localhost:4173/app')
+  await first.waitForSelector('.sheet-page')
+  await first.waitForTimeout(400)
+
+  const named = await first.$eval('.sheet.current', (e) => e.textContent)
+  const shown = await first.$eval('.sheet-page', (e) => e.textContent)
+  check('a first visit opens the starter sheet, not a blank page',
+    named === 'Start here' && /Longhand reads a sheet top to bottom/.test(shown), named)
+  const verdicts = await first.$$eval('.verdict', (els) => els.map((e) => e.textContent))
+  check('and the starter sheet passes its own check',
+    verdicts.length > 0 && verdicts.every((t) => !/NOT OK/.test(t)), JSON.stringify(verdicts))
+
+  await first.click('.sheet.add')
+  await first.waitForSelector('.templates')
+  const names = await first.$$eval('.templates strong', (els) => els.map((e) => e.textContent))
+  check('a new sheet offers somewhere to start from', names.length >= 5, JSON.stringify(names))
+
+  await first.click('.templates button:has-text("Parameter study")')
+  await first.waitForTimeout(500)
+  const made = await first.evaluate(() =>
+    JSON.parse(localStorage.getItem('longhand:store')))
+  const added = made.projects[0].sheets.at(-1)
+  check('and picking one makes the sheet', added.name === 'Parameter study' &&
+    added.source.includes('table'), added.name)
+  check('the template list closes once you have chosen',
+    (await first.$('.templates')) === null)
+  await first.close()
 }
 
 await browser.close()

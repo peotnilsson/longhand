@@ -40,7 +40,7 @@ export const REFERENCE: Section[] = [
     id: 'writing',
     title: 'Writing a sheet',
     blurb:
-      'One line at a time, top to bottom. A line is an assignment, a check, a function, a table, a heading or a note — and a symbol means whatever the line above said it means.',
+      'One line at a time, top to bottom. A line is an assignment, a check, a function, a table, a heading or a note — and a symbol means whatever the line above said it means. Everything below can be inserted from the editor by typing / on an empty line, so none of it has to be memorised.',
     entries: [
       {
         id: 'value',
@@ -530,6 +530,19 @@ export const REFERENCE: Section[] = [
     id: 'keyboard',
     title: 'Keyboard',
     entries: [
+      {
+        id: 'k-palette',
+        code: '/',
+        summary: 'On an empty line: a list of every construct, inserted for you.',
+        detail:
+          'The palette is this page with the prose taken out. Type a word after the slash to narrow it — "table", "tolerance", "unknowns" — and what gets inserted is the line with its fields laid out, which you tab through. It is the fastest way to use something you have read about here once and cannot quite remember.',
+        keywords: ['palette', 'slash', 'insert', 'snippet', 'template', 'command'],
+      },
+      {
+        id: 'k-palette-key',
+        code: 'Cmd/Ctrl + Enter',
+        summary: 'The same palette, without typing the slash first.',
+      },
       { id: 'k-new', code: 'Alt + N', summary: 'New sheet in this project.' },
       { id: 'k-move', code: 'Alt + [ / ]', summary: 'Previous / next sheet.' },
       { id: 'k-panels', code: 'Alt + P / H / ,', summary: 'Project, Help, Settings.' },

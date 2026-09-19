@@ -1,4 +1,5 @@
 import type { ToleranceMode } from './engine'
+import { STARTER } from './templates'
 
 /**
  * A project is the unit engineers deliver: a set of sheets sharing one title
@@ -90,51 +91,6 @@ export const emptyMeta = (): ProjectMeta => ({
 
 export const defaultSettings = (): Settings => ({ theme: 'system', author: '', project: '' })
 
-export const EXAMPLE = `# Beam check - section A-A
-
-// Inputs, with manufacturing tolerances
-b     = 300 mm +- 2 mm
-h     = 500 mm +- 3 mm
-M_Ed  = 250 kN*m
-f_ck  = 30 MPa
-
-// Results keep the units you wrote: mm*mm^2 stays mm^3,
-// and a moment stays kN*m instead of collapsing into kJ
-W     = b*h^2/6
-sigma = M_Ed/W
-
-// A check renders as a verdict with the margin
-sigma <= f_ck
-
-// Your own functions
-A_circle(d) = pi*d^2/4
-A_bar = A_circle(20 mm)
-
-// A table checks many sections at once
-table
-  section | bw     | hw     | Wt = bw*hw^2/6 | st = M_Ed/Wt | ok = st <= f_ck
-  A       | 300 mm | 500 mm
-  B       | 250 mm | 450 mm
-  C       | 200 mm | 350 mm
-end
-
-// The other question: what width would just about do?
-b_req = solve sigma = f_ck for b
-
-// A named table becomes data you can read between the rows of
-table steel
-  profile | h      | A
-  IPE200  | 200 mm | 2850 mm^2
-  IPE300  | 300 mm | 5380 mm^2
-  IPE400  | 400 mm | 8450 mm^2
-end
-
-A_250 = interp(250 mm, steel.h, steel.A)
-A_300 = lookup("IPE300", steel.profile, steel.A)
-
-// And a sweep shows sensitivity
-plot sigma vs b from 200 mm to 400 mm
-`
 
 export function newSheet(name: string, source = '# New calculation\n\n'): Sheet {
   return { id: newId(), name, source }
@@ -149,12 +105,22 @@ export function newProject(name: string, meta: Partial<ProjectMeta> = {}): Proje
   }
 }
 
+/**
+ * What a browser that has never opened Longhand before is handed.
+ *
+ * It used to be the demonstration sheet — fifty lines showing off every
+ * construct at once, which is a fine advertisement and a terrible starting
+ * point: there is nothing in it you would keep, so the first thing anyone did
+ * was select all and delete. The starter template is a real check, short
+ * enough to read before deciding whether to edit it or start again, and the
+ * demonstration sheet is still one keystroke away under "+ Sheet".
+ */
 export function freshStore(): Store {
   const project: Project = {
     id: newId(),
     name: 'Example project',
     meta: emptyMeta(),
-    sheets: [{ id: newId(), name: 'Beam check', source: EXAMPLE }],
+    sheets: [{ id: newId(), name: STARTER.name, source: STARTER.source }],
   }
   return {
     version: 4,

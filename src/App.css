@@ -1658,3 +1658,49 @@ body {
     padding: 16px 20px 64px;
   }
 }
+
+/* The template list under "+ Sheet". A new sheet is the moment a blank page
+   is least useful, so the choice is offered there rather than hidden in a
+   menu — and each line says when you would pick it. */
+.sheet.add.on {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+.templates {
+  margin: 4px 0 6px;
+  padding: 0;
+  list-style: none;
+  border-left: 2px solid var(--rule);
+}
+
+.templates button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.templates button:hover {
+  background: var(--hover);
+}
+
+.templates strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.templates span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+}

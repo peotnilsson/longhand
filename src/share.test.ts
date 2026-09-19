@@ -7,8 +7,10 @@ import {
   shareLink,
   LONG_LINK,
 } from './share'
-import { EXAMPLE } from './store'
+import { TEMPLATES } from './templates'
 import { EXAMPLES } from './examples'
+
+const TOUR = TEMPLATES.find((template) => template.id === 'tour')!.source
 
 describe('share links', () => {
   it('round-trips a sheet', async () => {
@@ -38,8 +40,8 @@ describe('share links', () => {
   })
 
   it('compresses a real sheet to something worth sending', async () => {
-    const payload = await encodeSheet({ name: 'Example', source: EXAMPLE })
-    expect(payload.length).toBeLessThan(EXAMPLE.length)
+    const payload = await encodeSheet({ name: 'Example', source: TOUR })
+    expect(payload.length).toBeLessThan(TOUR.length)
     expect(payload.length).toBeLessThan(LONG_LINK)
   })
 
