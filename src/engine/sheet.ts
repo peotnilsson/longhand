@@ -10,18 +10,34 @@ import {
   toNumberIn,
 } from './units'
 import { symbolToTex, toTex, valueToTex, sameTex } from './tex'
-import { definitionIndex, parseSolve, solve, SolveError, type SolveSetup } from './solve'
+import {
+  definitionIndex,
+  parseSolve,
+  parseSolve2,
+  solve,
+  solve2,
+  SolveError,
+  type SolveSetup,
+} from './solve'
 import { builtins } from './builtins'
-import { splitNote } from './source'
+import { splitNote, splitQuery } from './source'
 import { applyDirective, parseDirective, splitArrows } from './rounding'
 import { elementwisePowers, expandRanges } from './vectors'
 import {
   collectSymbols,
+  cloneUncertainty,
+  correlationKey,
+  emptyUncertainty,
+  parseCorrelate,
   propagate,
   splitTolerance,
   type Contribution,
   type ToleranceMode,
+  type Uncertainty,
 } from './uncertainty'
+import { absoluteTemperatureMisuse } from './temperature'
+import { checked, defineUnit, parseSignature, parseUnitLine } from './declare'
+import { IterateError, iterate, parseIterate } from './iterate'
 
 export type { ToleranceMode }
 
@@ -54,8 +70,22 @@ export type Line =
       tolerance?: ToleranceView
       warning?: string
       note?: string
+      /** A reviewer's question, printed in the margin. */
+      query?: string
+      /** The symbol this line defines, for cross-references and the inspector. */
+      name?: string
+      /** Its equation number, assigned in the order the sheet reads. */
+      equation?: number
     }
-  | { kind: 'definition'; tex: string; summary: string; warning?: string; note?: string }
+  | {
+      kind: 'definition'
+      tex: string
+      summary: string
+      warning?: string
+      note?: string
+      query?: string
+      name?: string
+    }
   | {
       kind: 'check'
       tex: string
@@ -63,7 +93,9 @@ export type Line =
       margin: string | null
       summary: string
       note?: string
+      query?: string
     }
+  | { kind: 'break' }
   | { kind: 'figure'; id: string; caption: string; number: number; summary: string }
   | { kind: 'table'; headers: string[]; rows: TableCell[][]; summary: string }
   | { kind: 'plot'; data: PlotData; summary: string }
@@ -76,7 +108,7 @@ interface Definition {
 
 interface Context {
   scope: Record<string, unknown>
-  sigmas: Record<string, unknown>
+  uncertainty: Uncertainty
   definitions: Definition[]
   /** Figures are numbered in the order they appear, which is the only order that makes sense. */
   figures: number
@@ -101,7 +133,7 @@ const COMPARISON_TEX: Record<string, string> = {
 
 const cloneContext = (context: Context): Context => ({
   scope: { ...context.scope },
-  sigmas: { ...context.sigmas },
+  uncertainty: cloneUncertainty(context.uncertainty),
   definitions: [...context.definitions],
   figures: context.figures,
 })
@@ -181,8 +213,13 @@ function evaluateStatement(
   const { precision, mode } = options
 
   // Optional trailing note:  b = 300 mm  // from drawing A-102
-  const { body: withoutNote, note } = splitNote(line)
-  line = withoutNote
+  // and, after it, a reviewer's query:   ?? which load case is this
+  const { body: withoutNote, note: rawNote } = splitNote(line)
+  const noteParts = splitQuery(rawNote ?? '')
+  const withoutQuery = splitQuery(withoutNote)
+  const note = noteParts.body || undefined
+  const query = withoutQuery.query ?? noteParts.query
+  line = withoutQuery.body
 
   // Everything after an arrow:  -> MPa  -> 3 sf  -> ceil 10 mm, chained.
   const arrows = splitArrows(line)
@@ -200,6 +237,16 @@ function evaluateStatement(
     }
   }
 
+  // `A(d: length) = pi*d^2/4` — the kinds come out before mathjs sees the line,
+  // and go back on as a check around the function afterwards.
+  let signature: ReturnType<typeof parseSignature> = null
+  try {
+    signature = parseSignature(body)
+    if (signature) body = signature.body
+  } catch (error) {
+    return { kind: 'error', source: line, message: (error as Error).message }
+  }
+
   try {
     const node = math.parse(expandRanges(body))
     // `node` is what gets rendered — the formula exactly as written. `runnable`
@@ -214,17 +261,35 @@ function evaluateStatement(
       const functionName = (node as any).name
       const redefined = context.scope[functionName] !== undefined
       runnable.evaluate(context.scope)
+      if (signature) {
+        const order: string[] = (node as any).params ?? []
+        context.scope[functionName] = checked(
+          context.scope[functionName] as (...args: unknown[]) => unknown,
+          signature,
+          order,
+        )
+      }
       context.definitions.push({ name: functionName, node: runnable })
+      const declared = signature ? Object.entries(signature.kinds) : []
       return {
         kind: 'definition',
+        name: functionName,
+        query,
         tex: toTex(node, context.scope),
-        summary: `${functionName}() defined`,
+        summary: declared.length
+          ? `${functionName}() defined — ${declared
+              .map(([parameter, kind]) => `${parameter} is a ${kind}`)
+              .join(', ')}`
+          : `${functionName}() defined`,
         note,
         warning: redefined
           ? `${functionName} was already defined above — this replaces it for the lines below.`
           : undefined,
       }
     }
+
+    const misuse = absoluteTemperatureMisuse(node, context.scope)
+    if (misuse) return { kind: 'error', source: line, message: misuse }
 
     // ---- check:  sigma <= f_ck
     if (type === 'OperatorNode' && COMPARISONS.has((node as any).op)) {
@@ -269,6 +334,7 @@ function evaluateStatement(
         margin,
         summary: margin ? `${verdict} — ${margin}` : verdict,
         note,
+        query,
       }
     }
 
@@ -315,13 +381,30 @@ function evaluateStatement(
       tolerance = undefined
     } else if (sigmaSource) {
       const sigma = math.parse(sigmaSource).evaluate(context.scope)
-      if (name) context.sigmas[name] = sigma
+      if (name) {
+        // A ± written on the line is a measurement: it is where uncertainty
+        // enters the sheet, and it is what the shares further down name.
+        context.uncertainty.sigmas[name] = sigma
+        context.uncertainty.roots.add(name)
+        delete context.uncertainty.derivations[name]
+      }
       tolerance = toleranceView(sigma, [], value, precision)
     } else {
-      const propagated = propagate(rhs, context.scope, context.sigmas, mode)
+      const propagated = propagate(rhs, context.scope, context.uncertainty, mode)
       if (propagated) {
-        if (name) context.sigmas[name] = propagated.sigma
+        if (name) {
+          context.uncertainty.sigmas[name] = propagated.sigma
+          context.uncertainty.roots.delete(name)
+          // Kept so a line further down can be expressed in terms of the
+          // measurements behind this one rather than this one.
+          context.uncertainty.derivations[name] = rhs
+        }
         tolerance = toleranceView(propagated.sigma, propagated.contributions, value, precision)
+      } else if (name) {
+        // Redefined without an uncertainty: the old one no longer applies.
+        delete context.uncertainty.sigmas[name]
+        context.uncertainty.roots.delete(name)
+        delete context.uncertainty.derivations[name]
       }
     }
 
@@ -344,6 +427,8 @@ function evaluateStatement(
       tolerance,
       warning,
       note,
+      query,
+      name: name ?? undefined,
     }
   } catch (error) {
     return { kind: 'error', source: line, message: explain(error, defined) }
@@ -593,6 +678,166 @@ function evaluateTable(
 }
 
 /**
+ * `unit ksi = 1000 psi`
+ *
+ * A sheet naming a unit its own field uses. Definitions are global to the
+ * engine and overwrite a previous one of the same name, so re-running is
+ * harmless — and the line prints what it defined, because two sheets defining
+ * the same name differently is the one way this could confuse somebody.
+ */
+function evaluateUnit(line: string): Line {
+  const request = parseUnitLine(line)
+  if (!request) {
+    return {
+      kind: 'error',
+      source: line,
+      message: 'Write a unit as:  unit ksi = 1000 psi',
+    }
+  }
+  try {
+    return { kind: 'note', text: `Unit defined: ${defineUnit(request)}` }
+  } catch (error) {
+    return { kind: 'error', source: line, message: (error as Error).message }
+  }
+}
+
+/**
+ * `correlate b and h by 0.8`
+ *
+ * Propagation assumes the inputs are independent, which is the usual
+ * assumption and occasionally the wrong one: two dimensions measured with the
+ * same instrument move together, and a budget that ignores that understates
+ * the result.
+ */
+function evaluateCorrelate(line: string, context: Context): Line {
+  const request = parseCorrelate(line)
+  if (!request) {
+    return {
+      kind: 'error',
+      source: line,
+      message: 'Write a correlation as:  correlate b and h by 0.8',
+    }
+  }
+  if (request.coefficient < -1 || request.coefficient > 1) {
+    return {
+      kind: 'error',
+      source: line,
+      message: `a correlation runs from -1 to 1, and ${request.coefficient} is outside that`,
+    }
+  }
+  context.uncertainty.correlations[correlationKey(request.a, request.b)] = request.coefficient
+  return {
+    kind: 'note',
+    text: `${request.a} and ${request.b} are treated as ${
+      request.coefficient === 0 ? 'independent' : `correlated by ${request.coefficient}`
+    } from here on.`,
+  }
+}
+
+/** `f = iterate step(f) from 0.02` */
+function evaluateIterate(
+  rawLine: string,
+  context: Context,
+  options: Required<Pick<SheetOptions, 'precision' | 'mode'>>,
+): Line {
+  const { body: line, note } = splitNote(rawLine)
+  const request = parseIterate(line)!
+  try {
+    const { value, rounds } = iterate(request, context.scope)
+    context.scope[request.name] = value
+    const node = math.parse(`${request.name} = ${formatValue(value, options.precision)}`)
+    context.definitions.push({ name: request.name, node })
+    const shown = formatValue(value, options.precision)
+    return {
+      kind: 'calc',
+      tex: `${symbolToTex(request.name, context.scope)} = ${valueToTex(shown, context.scope)}`,
+      summary: `= ${shown} after ${rounds} round${rounds === 1 ? '' : 's'}`,
+      note,
+    }
+  } catch (error) {
+    if (error instanceof IterateError) {
+      return { kind: 'error', source: line, message: error.message }
+    }
+    return { kind: 'error', source: line, message: (error as Error).message }
+  }
+}
+
+/** `x, y = solve A = B and C = D for x, y` */
+function evaluateSolve2(
+  rawLine: string,
+  context: Context,
+  options: Required<Pick<SheetOptions, 'precision' | 'mode'>>,
+  defined: Set<string>,
+  lines: string[],
+  index: number,
+  snapshots?: Context[],
+): Line {
+  const { body: line, note } = splitNote(rawLine)
+  const request = parseSolve2(line)!
+  const { precision } = options
+
+  try {
+    // Replay from before the *earlier* of the two definitions, so both
+    // variables are free when the sheet tail is re-run.
+    const firstAt = definitionIndex(lines, request.variables[0], index)
+    const secondAt = definitionIndex(lines, request.variables[1], index)
+    const earliest = Math.min(
+      firstAt < 0 ? Number.MAX_SAFE_INTEGER : firstAt,
+      secondAt < 0 ? Number.MAX_SAFE_INTEGER : secondAt,
+    )
+
+    const setup =
+      earliest !== Number.MAX_SAFE_INTEGER && snapshots && earliest >= 1 && snapshots[earliest - 1]
+        ? {
+            scope: { ...snapshots[earliest - 1].scope },
+            replay: lines
+              .slice(earliest, index)
+              .filter((_line, at) => at + earliest !== firstAt && at + earliest !== secondAt),
+          }
+        : {
+            scope: builtins(),
+            replay: lines.slice(0, index).filter((_line, at) => at !== firstAt && at !== secondAt),
+          }
+
+    const { values } = solve2(request, {
+      ...setup,
+      references: [
+        context.scope[request.variables[0]],
+        context.scope[request.variables[1]],
+      ],
+    })
+
+    request.names.forEach((name, which) => {
+      context.scope[name] = values[which]
+      context.definitions.push({
+        name,
+        node: math.parse(`${name} = ${formatValue(values[which], precision)}`),
+      })
+    })
+
+    const shown = request.names
+      .map((name, which) => `${name} = ${formatValue(values[which], precision)}`)
+      .join(',  ')
+    const tex = request.names
+      .map(
+        (name, which) =>
+          `${symbolToTex(name, context.scope)} = ${valueToTex(
+            formatValue(values[which], precision),
+            context.scope,
+          )}`,
+      )
+      .join(', \\; ')
+
+    return { kind: 'calc', tex, summary: `${shown}`, note }
+  } catch (error) {
+    if (error instanceof SolveError) {
+      return { kind: 'error', source: line, message: error.message }
+    }
+    return { kind: 'error', source: line, message: explain(error, defined) }
+  }
+}
+
+/**
  * `figure sectionAA "Cross-section at A-A"`
  *
  * The words live in the sheet — they are text, and text is what a sheet is
@@ -622,34 +867,55 @@ function evaluateFigure(line: string, context: Context): Line {
 }
 
 /**
- * `@section_AA` in prose becomes "Figure 2".
+ * Numbers every line that defines something, and resolves `@name` references.
  *
- * Done after the whole sheet has run, because a reference can point at a
- * figure further down and the number is not known until then.
+ * `@section_AA` becomes "Figure 2" and `@W_el` becomes "eq. 7", both worked
+ * out after the whole sheet has run, because a reference can point at
+ * something further down and the number is not known until then. Referring to
+ * a *symbol* rather than to a label means there is nothing extra to write: the
+ * name is already on the line, and moving the line renumbers the reference.
+ *
+ * Cross-sheet references are deliberately not here. "See Loads, eq. 3" would
+ * mean numbering another sheet at render time and quietly depending on its
+ * contents, and a reference that silently points at the wrong line is worse
+ * than one that was never made.
  */
-function resolveFigureReferences(results: Line[]): Line[] {
-  const numbers = new Map<string, number>()
-  for (const line of results) {
-    if (line.kind === 'figure') numbers.set(line.id, line.number)
-  }
-  if (numbers.size === 0) return results
+function resolveReferences(results: Line[]): Line[] {
+  const figures = new Map<string, number>()
+  const equations = new Map<string, number>()
+
+  let equation = 0
+  const numbered = results.map((line) => {
+    if (line.kind === 'figure') {
+      figures.set(line.id, line.number)
+      return line
+    }
+    if (line.kind === 'calc' && line.name) {
+      equation += 1
+      equations.set(line.name, equation)
+      return { ...line, equation }
+    }
+    return line
+  })
+
+  if (figures.size === 0 && equations.size === 0) return numbered
 
   const swap = (text: string): string =>
-    text.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, id: string) =>
-      numbers.has(id) ? `Figure ${numbers.get(id)}` : whole,
-    )
-  const swapNote = (note?: string) => (note === undefined ? undefined : swap(note))
+    text.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, id: string) => {
+      if (figures.has(id)) return `Figure ${figures.get(id)}`
+      if (equations.has(id)) return `eq. ${equations.get(id)}`
+      return whole
+    })
 
-  return results.map((line) => {
+  return numbered.map((line) => {
     if (line.kind === 'prose' || line.kind === 'note') {
       const text = swap(line.text)
       return text === line.text ? line : { ...line, text }
     }
-    if (
-      (line.kind === 'calc' || line.kind === 'definition' || line.kind === 'check') &&
-      line.note
-    ) {
-      return { ...line, note: swapNote(line.note) }
+    if (line.kind === 'calc' || line.kind === 'definition' || line.kind === 'check') {
+      const note = line.note === undefined ? undefined : swap(line.note)
+      const query = line.query === undefined ? undefined : swap(line.query)
+      return note === line.note && query === line.query ? line : { ...line, note, query }
     }
     return line
   })
@@ -781,6 +1047,16 @@ function runLines(
       result = { kind: 'prose', text: line.replace(/^\/\/\s*/, '') }
     } else if (/^import\b/.test(line)) {
       result = evaluateImport(splitNote(line).body, context, options, libraries, depth)
+    } else if (/^page\s+break\s*$/.test(line)) {
+      result = { kind: 'break' }
+    } else if (/^unit\b/.test(line)) {
+      result = evaluateUnit(splitNote(line).body)
+    } else if (/^correlate\b/.test(line)) {
+      result = evaluateCorrelate(splitNote(line).body, context)
+    } else if (parseIterate(splitNote(line).body)) {
+      result = evaluateIterate(line, context, options)
+    } else if (parseSolve2(splitNote(line).body)) {
+      result = evaluateSolve2(line, context, options, defined, lines, index, snapshots)
     } else if (/^figure\b/.test(line)) {
       result = evaluateFigure(splitNote(line).body, context)
     } else if (/^plot\b/.test(line)) {
@@ -846,7 +1122,12 @@ export function evaluateSheet(source: string, options: SheetOptions = {}): Line[
   // Incremental recompute: everything above the first edited line is unchanged,
   // because evaluation is strictly sequential.
   let start = 0
-  let context: Context = { scope: builtins(), sigmas: {}, definitions: [], figures: 0 }
+  let context: Context = {
+    scope: builtins(),
+    uncertainty: emptyUncertainty(),
+    definitions: [],
+    figures: 0,
+  }
   const results: Line[] = []
   const snapshots: Context[] = []
 
@@ -873,7 +1154,7 @@ export function evaluateSheet(source: string, options: SheetOptions = {}): Line[
   runLines(lines, context, settings, libraries, defined, 0, results, snapshots, start)
 
   cache = { key, lines, results, snapshots }
-  return resolveFigureReferences(results)
+  return resolveReferences(results)
 }
 
 /**

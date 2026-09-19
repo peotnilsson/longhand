@@ -1347,6 +1347,113 @@ body {
   font-weight: 600;
 }
 
+
+/* ------------------------------------------------- queries, equations, breaks */
+
+/**
+ * A reviewer's question, written in the sheet as `?? is this the right case`.
+ *
+ * Deliberately not styled like a warning: it is not the app saying something
+ * is wrong, it is a person saying they are not sure. Amber and a rule down the
+ * left, the way a pencil note in a margin reads.
+ */
+.query {
+  margin: 4px 0 0;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--warn);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--warn);
+}
+
+.query::before {
+  content: 'Query: ';
+  font-weight: 600;
+}
+
+/* The number sits out in the margin, where an engineer numbers an equation. */
+.calc-block {
+  position: relative;
+}
+
+.equation {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.page-break {
+  height: 0;
+}
+
+/* ------------------------------------------------- the symbols panel */
+
+.symbols {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.symbols li {
+  border-bottom: 1px solid var(--rule);
+}
+
+.symbol-head {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(0, 1fr) auto;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 4px;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.symbol-head:hover {
+  background: var(--hover);
+}
+
+.symbol-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.symbol-where {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.symbol-body {
+  padding: 2px 4px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.symbol-body p {
+  margin: 0;
+}
+
+.symbol-body strong {
+  color: var(--ink);
+}
+
+/* ------------------------------------------------- the draft watermark */
+
+.watermark {
+  display: none;
+}
+
 /* ---------------------------------------------------------- print */
 
 @page {
@@ -1449,6 +1556,47 @@ body {
 
   .sheet-figure img {
     max-height: 110mm;
+  }
+
+  /* Where the author asked for one. */
+  .page-break {
+    break-after: page;
+  }
+
+  /**
+   * PRELIMINARY, across the page.
+   *
+   * Printed rather than shown: on screen the status is in the project panel
+   * and a watermark would be in the way, but on paper there is nothing else
+   * to say which of two identical-looking documents has been issued.
+   */
+  .sheet-page.draft {
+    position: relative;
+  }
+
+  .sheet-page.draft .watermark {
+    display: block;
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-30deg);
+    font-size: 72pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: rgba(0, 0, 0, 0.07);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* A query is a question for the checker, so it has to survive the printer. */
+  .query {
+    break-inside: avoid;
+    color: #8a5a00;
+  }
+
+  .equation {
+    color: #6b6b66;
   }
 
   .sheet-foot {

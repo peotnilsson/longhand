@@ -43,6 +43,8 @@ import {
   type Theme,
 } from './store'
 import { findExample } from './examples'
+import { CONSTANTS_NAME, CONSTANTS_SHEET } from './constants'
+import { inspect, downstream, toMarkdown, tableFromPaste } from './inspect'
 import { summariseChecks, tightest, verdictLine, type SheetChecks } from './checks'
 import { DISCLAIMER, buildStamp } from './build'
 import { ISSUES_URL, issueUrl, mailtoUrl, optedOut, setOptedOut, start, track, trackOnce } from './analytics'
@@ -101,9 +103,14 @@ function Rendered({
         <div className="calc-block">
           <Tex tex={line.tex} className="calc definition" />
           {line.note && <p className="line-note">{line.note}</p>}
+          {line.query && <p className="query">{line.query}</p>}
           {line.warning && <p className="warning">{line.warning}</p>}
         </div>
       )
+
+    case 'break':
+      // Nothing on screen; on paper it is where the author asked for a new page.
+      return <div className="page-break" />
 
     case 'figure': {
       const source = figures?.[line.id]
@@ -131,6 +138,7 @@ function Rendered({
           <div>
             <Tex tex={line.tex} className="calc" />
             {line.note && <p className="line-note">{line.note}</p>}
+            {line.query && <p className="query">{line.query}</p>}
           </div>
           <div className="verdict">
             <span className="badge">{line.pass ? 'OK' : 'NOT OK'}</span>
@@ -171,6 +179,7 @@ function Rendered({
     case 'calc':
       return (
         <div className="calc-block">
+          {line.equation !== undefined && <span className="equation">({line.equation})</span>}
           <Tex tex={line.tex} className="calc" />
           {line.tolerance && (
             <div className="tolerance">
@@ -187,6 +196,7 @@ function Rendered({
             </div>
           )}
           {line.note && <p className="line-note">{line.note}</p>}
+          {line.query && <p className="query">{line.query}</p>}
           {line.warning && <p className="warning">{line.warning}</p>}
         </div>
       )
@@ -379,7 +389,10 @@ function SheetDocument({
   )
 
   return (
-    <div className="sheet-page">
+    <div className={project.meta.status === 'issued' ? 'sheet-page' : 'sheet-page draft'}>
+      {/* A draft and an issued calculation look identical on paper otherwise,
+          which is how a draft ends up in a submission. */}
+      {project.meta.status !== 'issued' && <div className="watermark" aria-hidden="true">PRELIMINARY</div>}
       <TitleBlock project={project} title={title} position={position} />
       <ChecksSummary summary={checks} onJump={onJump} anchorFor={anchorFor} />
       {lines.map((line, index) =>
@@ -395,6 +408,7 @@ function SheetDocument({
       {/* Print only: which build produced this, and what it is and is not.
           A calculation that goes into a submission has to say both. */}
       <p className="sheet-foot">
+        {project.meta.footer ? `${project.meta.footer} — ` : ''}
         {DISCLAIMER} {buildStamp()}
       </p>
     </div>
@@ -441,7 +455,15 @@ const pageCss = (): string => `
 .sheet-figure { break-inside: avoid; }
 `
 
-type Panel = 'none' | 'meta' | 'settings' | 'profile' | 'share' | 'history' | 'feedback'
+type Panel =
+  | 'none'
+  | 'meta'
+  | 'settings'
+  | 'profile'
+  | 'share'
+  | 'history'
+  | 'feedback'
+  | 'symbols'
 
 /** "Peo Nilsson" -> "PN", "Peo" -> "P", nothing -> a neutral mark. */
 const initials = (name: string): string => {
@@ -552,6 +574,7 @@ export default function App() {
   const [counting, setCounting] = useState(!optedOut())
   const [compare, setCompare] = useState<string | null>(null)
   const [figureError, setFigureError] = useState<string | null>(null)
+  const [traced, setTraced] = useState<string | null>(null)
   const editorRef = useRef<EditorView | null>(null)
   const figureInput = useRef<HTMLInputElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
@@ -702,7 +725,10 @@ export default function App() {
 
   // Every other sheet in the project is importable by name.
   const libraries = useMemo(() => {
-    const map: Record<string, string> = {}
+    // The constants sheet is available to every sheet without anyone having to
+    // create it, and a sheet of the user's own with the same name wins — their
+    // numbers are more likely to be the right ones for their work than ours.
+    const map: Record<string, string> = { [CONSTANTS_NAME]: CONSTANTS_SHEET }
     for (const other of project.sheets) {
       if (other.id !== sheet.id) map[other.name] = other.source
     }
@@ -935,6 +961,43 @@ export default function App() {
     window.history.replaceState(null, '', window.location.pathname)
     setShared(null)
     track('sheet created', { from: 'share' })
+  }
+
+  /**
+   * A spreadsheet range, pasted in as a table block.
+   *
+   * Retyping twenty rows of section properties is the most tedious thing about
+   * starting a sheet, and Excel already puts tab-separated text on the
+   * clipboard. What comes out is an ordinary table block the engineer can
+   * edit, not a black box.
+   */
+  const pasteTable = async () => {
+    setFigureError(null)
+    try {
+      const text = await navigator.clipboard.readText()
+      const block = tableFromPaste(text)
+      if (!block) {
+        setFigureError(
+          'That does not look like a table. Copy a range from a spreadsheet — at least a ' +
+            'header row and one row under it.',
+        )
+        return
+      }
+      insertLine(block.trimEnd())
+    } catch {
+      setFigureError(
+        'This browser would not let Longhand read the clipboard. Paste into the editor and ' +
+          'put | between the columns instead.',
+      )
+    }
+  }
+
+  const exportMarkdown = () => {
+    download(
+      toMarkdown(sheetTitle(sheet.source), lines),
+      `${slug(sheet.name)}.md`,
+      'text/markdown',
+    )
   }
 
   const saveRevision = () => {
@@ -1226,6 +1289,10 @@ export default function App() {
           setCompare(null)
           toggle('history')
           break
+        case 'y':
+          setTraced(null)
+          toggle('symbols')
+          break
         case ',':
           toggle('settings')
           break
@@ -1246,6 +1313,18 @@ export default function App() {
     [deferredSource, lines],
   )
   const revisions = sheet.revisions ?? []
+  /**
+   * Only while the panel is open.
+   *
+   * `inspect` reparses every line to build the dependency graph, which on a
+   * 300-line sheet added about a second to every keystroke — the one thing the
+   * deferred evaluation exists to prevent. Nobody needs the graph while they
+   * are typing; they need it when they ask for it.
+   */
+  const symbols = useMemo(
+    () => (panel === 'symbols' ? inspect(deferredSource, lines) : []),
+    [panel, deferredSource, lines],
+  )
 
   /**
    * "Somebody wrote something real in it" is the one signal worth having, and
@@ -1435,6 +1514,15 @@ export default function App() {
             >
               History
             </button>
+            <button
+              className={panel === 'symbols' ? 'on' : ''}
+              onClick={() => {
+                setTraced(null)
+                setPanel((current) => (current === 'symbols' ? 'none' : 'symbols'))
+              }}
+            >
+              Symbols
+            </button>
             <button onClick={() => figureInput.current?.click()}>Figure</button>
             <a className="toolbar-link" href="/docs" target="_blank" rel="noreferrer">
               Help
@@ -1499,8 +1587,31 @@ export default function App() {
                   onChange={(event) => setMeta({ revision: event.target.value })}
                 />
               </label>
+              <label>
+                <span>Status</span>
+                <select
+                  aria-label="Project status"
+                  value={project.meta.status ?? 'draft'}
+                  onChange={(event) =>
+                    setMeta({ status: event.target.value as 'draft' | 'issued' })
+                  }
+                >
+                  <option value="draft">Draft — prints PRELIMINARY</option>
+                  <option value="issued">Issued — prints clean</option>
+                </select>
+              </label>
+              <label>
+                <span>Footer line</span>
+                <input
+                  value={project.meta.footer ?? ''}
+                  onChange={(event) => setMeta({ footer: event.target.value })}
+                  placeholder="Your firm, job number"
+                />
+              </label>
               <p className="hint">
-                Every sheet in this project shares this title block.
+                Every sheet in this project shares this title block. A draft prints PRELIMINARY
+                across every page, because a draft and an issued calculation otherwise look
+                identical on paper.
               </p>
             </section>
 
@@ -1520,6 +1631,7 @@ export default function App() {
                   <span>Move this sheet to</span>
                   <select
                     value=""
+                    aria-label="Move this sheet to another project"
                     onChange={(event) => event.target.value && moveToProject(event.target.value)}
                     disabled={project.sheets.length === 1}
                   >
@@ -1697,6 +1809,83 @@ export default function App() {
                 Restoring keeps where you are now as its own snapshot first, so looking through
                 history can never be the thing that loses work.
               </p>
+            </section>
+          </div>
+        )}
+
+        {panel === 'symbols' && (
+          <div className="panel">
+            <section>
+              <h3>Symbols</h3>
+              <p className="hint">
+                Everything this sheet defines, and what it is tied to. On twenty lines you can
+                hold this in your head; on two hundred, “what would change if I changed this”
+                is the question to answer before altering anything somebody else will check.
+              </p>
+              {symbols.length === 0 ? (
+                <p className="hint">This sheet does not define anything yet.</p>
+              ) : (
+                <>
+                  <ul className="symbols">
+                    {symbols.map((symbol) => {
+                      const affected = traced === symbol.name ? downstream(symbols, symbol.name) : []
+                      return (
+                        <li key={`${symbol.name}-${symbol.line}`}>
+                          <button
+                            className="symbol-head"
+                            onClick={() => setTraced(traced === symbol.name ? null : symbol.name)}
+                          >
+                            <code>{symbol.name}</code>
+                            <span className="symbol-value">{symbol.value}</span>
+                            <span className="symbol-where">
+                              {symbol.equation ? `eq. ${symbol.equation}` : `line ${symbol.line}`}
+                            </span>
+                          </button>
+                          {traced === symbol.name && (
+                            <div className="symbol-body">
+                              <p>
+                                <strong>Built from:</strong>{' '}
+                                {symbol.dependsOn.length ? symbol.dependsOn.join(', ') : 'nothing — it is an input'}
+                              </p>
+                              <p>
+                                <strong>Used directly by:</strong>{' '}
+                                {symbol.usedBy.length ? symbol.usedBy.join(', ') : 'nothing'}
+                              </p>
+                              <p>
+                                <strong>Changing it would redo:</strong>{' '}
+                                {affected.length ? affected.join(', ') : 'nothing downstream'}
+                              </p>
+                            </div>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  {symbols.some((symbol) => symbol.unused) && (
+                    <p className="hint">
+                      Nothing uses{' '}
+                      {symbols
+                        .filter((symbol) => symbol.unused)
+                        .map((symbol) => symbol.name)
+                        .join(', ')}
+                      . Sometimes that is deliberate; sometimes it is a name typed two ways.
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+
+            <section>
+              <h3>Take it elsewhere</h3>
+              <p className="hint">
+                Markdown for a report appendix, and a spreadsheet range pasted in as a table
+                rather than retyped.
+              </p>
+              <div className="settings-buttons">
+                <button onClick={exportMarkdown}>Export as Markdown</button>
+                <button onClick={pasteTable}>Paste a spreadsheet range</button>
+              </div>
+              {figureError && <p className="warning">{figureError}</p>}
             </section>
           </div>
         )}

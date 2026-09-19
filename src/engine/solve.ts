@@ -1,5 +1,6 @@
 import { create, all, type MathNode } from 'mathjs'
 import { splitTolerance } from './uncertainty'
+import { splitNote } from './source'
 
 const math = create(all)
 
@@ -52,7 +53,8 @@ function replayLine(line: string, scope: Record<string, unknown>): void {
   const trimmed = line.trim()
   if (isInert(trimmed)) return
 
-  let body = trimmed
+  let body = splitNote(trimmed).body
+  if (body === '') return
   const arrow = body.lastIndexOf('->')
   if (arrow !== -1) body = body.slice(0, arrow).trim()
 
@@ -196,3 +198,187 @@ export function definitionIndex(lines: string[], name: string, before: number): 
 }
 
 export type { MathNode }
+
+// ------------------------------------------------------------- two at once
+
+/**
+ * `x, y = solve A = B and C = D for x, y`
+ *
+ * Two equations, two unknowns. Bisection cannot do this — there is no line to
+ * bracket along — so this is Newton with a numerically estimated Jacobian,
+ * replaying the same sheet tail the one-unknown solver replays.
+ *
+ * Everything is done in dimensionless multipliers of the values the sheet
+ * already has: x is carried as t·x0 rather than as a quantity. That keeps the
+ * unit algebra out of the linear solve entirely, and it means the step sizes
+ * are sensible whatever the units happen to be.
+ */
+export interface Solve2Request {
+  names: [string, string]
+  left: [string, string]
+  right: [string, string]
+  variables: [string, string]
+}
+
+const PATTERN2 =
+  /^([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*solve\s+(.+?)\s*=\s*(.+?)\s+and\s+(.+?)\s*=\s*(.+?)\s+for\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/
+
+export function parseSolve2(line: string): Solve2Request | null {
+  const match = line.match(PATTERN2)
+  if (!match) return null
+  const [, nameA, nameB, leftA, rightA, leftB, rightB, varA, varB] = match
+  return {
+    names: [nameA, nameB],
+    left: [leftA, leftB],
+    right: [rightA, rightB],
+    variables: [varA, varB],
+  }
+}
+
+export interface Solve2Setup {
+  scope: Record<string, unknown>
+  replay: string[]
+  /** The current values of the two variables: their units, and the first guess. */
+  references: [unknown, unknown]
+}
+
+const ROUNDS2 = 60
+
+export function solve2(
+  request: Solve2Request,
+  setup: Solve2Setup,
+): { values: [unknown, unknown]; tries: number } {
+  let tries = 0
+  const [refA, refB] = setup.references
+
+  if (refA === undefined || refB === undefined) {
+    throw new SolveError(
+      `${request.variables.join(' and ')} both need a value above the solve line — ` +
+        'those values say what kind of quantity each one is, and where to start looking.',
+    )
+  }
+
+  const quantities = (t: [number, number]): [unknown, unknown] => [
+    math.multiply(refA as any, t[0]),
+    math.multiply(refB as any, t[1]),
+  ]
+
+  /** Both residuals at a trial point, still carrying their own units. */
+  const residuals = (t: [number, number]): [unknown, unknown] => {
+    tries += 1
+    const [a, b] = quantities(t)
+    const scope: Record<string, unknown> = {
+      ...setup.scope,
+      [request.variables[0]]: a,
+      [request.variables[1]]: b,
+    }
+    for (const line of setup.replay) replayLine(line, scope)
+    return [0, 1].map((which) => {
+      const left = math.parse(request.left[which]).evaluate(scope)
+      const right = math.parse(request.right[which]).evaluate(scope)
+      return math.subtract(left as any, right as any)
+    }) as [unknown, unknown]
+  }
+
+  // Each residual is scaled by its own size at the starting point, so the two
+  // equations weigh the same however differently they are measured.
+  const start = residuals([1, 1])
+  const scaleOf = (value: unknown): unknown => {
+    try {
+      const size = math.abs(value as any)
+      const zero = math.multiply(size as any, 0)
+      if (math.equal(size as any, zero as any) === true) return math.add(size as any, unitOne(value))
+      return size
+    } catch {
+      return 1
+    }
+  }
+  const unitOne = (like: unknown): unknown => {
+    try {
+      return math.multiply(math.divide(like as any, like as any) as any, 1)
+    } catch {
+      return 1
+    }
+  }
+  const scales = [scaleOf(start[0]), scaleOf(start[1])]
+
+  const plain = (t: [number, number]): [number, number] => {
+    const raw = residuals(t)
+    return [0, 1].map((which) => {
+      try {
+        return math.number(math.divide(raw[which] as any, scales[which] as any) as any)
+      } catch {
+        throw new SolveError(
+          `equation ${which + 1} compares quantities of different kinds, so it can never balance.`,
+        )
+      }
+    }) as [number, number]
+  }
+
+  const norm = (r: [number, number]): number => Math.hypot(r[0], r[1])
+
+  let t: [number, number] = [1, 1]
+  let r = plain(t)
+
+  for (let round = 0; round < ROUNDS2 && norm(r) > 1e-12; round += 1) {
+    // A Jacobian by central differences, on a step proportional to the guess.
+    const step: [number, number] = [
+      Math.max(Math.abs(t[0]), 1e-3) * 1e-6,
+      Math.max(Math.abs(t[1]), 1e-3) * 1e-6,
+    ]
+    const dA = plain([t[0] + step[0], t[1]])
+    const dA2 = plain([t[0] - step[0], t[1]])
+    const dB = plain([t[0], t[1] + step[1]])
+    const dB2 = plain([t[0], t[1] - step[1]])
+
+    const j11 = (dA[0] - dA2[0]) / (2 * step[0])
+    const j21 = (dA[1] - dA2[1]) / (2 * step[0])
+    const j12 = (dB[0] - dB2[0]) / (2 * step[1])
+    const j22 = (dB[1] - dB2[1]) / (2 * step[1])
+
+    const determinant = j11 * j22 - j12 * j21
+    if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-14) {
+      throw new SolveError(
+        `the two equations do not pin down ${request.variables.join(' and ')} separately — ` +
+          'they move together, so any number of answers would fit.',
+      )
+    }
+
+    const deltaA = (-r[0] * j22 + r[1] * j12) / determinant
+    const deltaB = (-r[1] * j11 + r[0] * j21) / determinant
+
+    // Back off rather than overshoot: a full Newton step can leave the region
+    // where the sheet still evaluates at all.
+    let scale = 1
+    let next: [number, number] = [t[0] + deltaA, t[1] + deltaB]
+    let nextR: [number, number]
+    for (;;) {
+      try {
+        nextR = plain(next)
+        if (Number.isFinite(norm(nextR)) && norm(nextR) < norm(r)) break
+      } catch {
+        /* fall through and halve */
+      }
+      scale /= 2
+      if (scale < 1e-6) {
+        throw new SolveError(
+          `no pair of values for ${request.variables.join(' and ')} brings both equations ` +
+            'together. Check the two equations really are different, and that a solution exists.',
+        )
+      }
+      next = [t[0] + deltaA * scale, t[1] + deltaB * scale]
+    }
+
+    t = next
+    r = nextR
+  }
+
+  if (norm(r) > 1e-6) {
+    throw new SolveError(
+      `${request.variables.join(' and ')} did not converge — the two equations are still ` +
+        'out by more than a millionth. Try starting from values closer to the answer.',
+    )
+  }
+
+  return { values: quantities(t), tries }
+}

@@ -99,6 +99,33 @@ export const REFERENCE: Section[] = [
         keywords: ['range', 'vector', 'list', 'series', 'load combination', 'element-wise', 'sum'],
       },
       {
+        id: 'query',
+        code: 'sigma = M_Ed/W   ?? is this the right load case',
+        summary: "A question for whoever checks the sheet.",
+        detail:
+          'A `??` note is kept apart from a `//` one on purpose: "here is why" and "I am not sure about this" are different things, and a checker wants to find only the second. It prints in the margin beside the line, where a pencil note would have gone, and it travels with the sheet because it lives in the text.',
+        example: 'M_Ed = 250 kN*m\nW = 1.25e7 mm^3\nsigma = M_Ed/W  // clause 6.2  ?? is 250 the right load case\n',
+        keywords: ['query', 'question', 'review', 'checker', 'comment', 'margin', '??'],
+      },
+      {
+        id: 'equation-number',
+        code: '// The section modulus is @W',
+        summary: 'Refer to an earlier line by its symbol, and get its equation number.',
+        detail:
+          'Every line that defines something is numbered in reading order, and the number prints in the margin. Writing @W anywhere in prose or in a note prints "eq. 7" — and because the reference is to the symbol rather than to a number you typed, moving a line renumbers the reference with it. The same @name syntax points at a figure and prints "Figure 2". References across sheets are deliberately not supported: a reference that silently points at the wrong line would be worse than one that was never made.',
+        example: 'b = 300 mm\nW = b^3\n// The section modulus is @W\n',
+        keywords: ['equation number', 'reference', 'cross-reference', 'eq', 'see', '@'],
+      },
+      {
+        id: 'page-break',
+        code: 'page break',
+        summary: 'Start a new page here when the sheet is printed.',
+        detail:
+          'Nothing on screen; on paper the next line starts a new page. For the places where a check should not begin at the foot of a page — everything else about where pages fall is worked out for you.',
+        example: 'a = 1 mm\npage break\nb = 2 mm\n',
+        keywords: ['page break', 'print', 'pagination', 'new page'],
+      },
+      {
         id: 'figure',
         code: 'figure section_AA "Cross-section at A-A"',
         summary: 'A sketch or photograph, captioned and numbered.',
@@ -112,9 +139,19 @@ export const REFERENCE: Section[] = [
         code: 'b = 300 mm +- 2 mm',
         summary: 'A value with an uncertainty, which propagates downwards.',
         detail:
-          'Write ± if you prefer; +- is easier to type. Every result that depends on this value gets a ± of its own, worked out from the partial derivatives of your own formula, and results with more than one uncertain input also show which input each share of the uncertainty came from. Settings chooses between combining them statistically (in quadrature, the usual assumption) and worst case (straight sum, the pessimistic bound). The shares are attributed to the quantities named on that line, so to see which original measurement dominates, look at the line where those measurements were combined.',
+          'Write ± if you prefer; +- is easier to type. Every result that depends on this value gets a ± of its own, worked out from the partial derivatives of your own formula. The shares name the *measurements* the uncertainty came from rather than the intermediate values in between: a stress built from a section modulus built from a width and a height reports the width and the height, because those are the things somebody can go and measure again. Settings chooses between combining them statistically (in quadrature, the usual assumption) and worst case (straight sum, the pessimistic bound).',
         example: 'b = 300 mm +- 2 mm\nh = 500 mm +- 3 mm\nW = b*h^2/6\n',
         keywords: ['tolerance', 'uncertainty', 'error', 'propagation', 'plus minus', '±'],
+      },
+      {
+        id: 'correlate',
+        code: 'correlate b and h by 0.8',
+        summary: 'Say that two measurements are not independent.',
+        detail:
+          'Propagation assumes the inputs are independent, which is the usual assumption and occasionally the wrong one: two dimensions measured with the same instrument move together, and a budget that ignores that understates the result. A coefficient of 1 means they move exactly together and their errors add; −1 means they move opposite ways and cancel; 0 is the default. It applies to every line below it.',
+        example:
+          'x = 100 mm +- 1 mm\ny = 100 mm +- 1 mm\ncorrelate x and y by 1\ns = x + y\n',
+        keywords: ['correlate', 'correlation', 'independent', 'covariance', 'uncertainty'],
       },
       {
         id: 'check',
@@ -243,6 +280,84 @@ export const REFERENCE: Section[] = [
   },
 
   {
+    id: 'harder',
+    title: 'When one pass is not enough',
+    blurb:
+      'The three shapes a calculation takes when the answer is not simply the next line down: something that feeds back on itself, two things that have to be true at once, and a choice between rows.',
+    entries: [
+      {
+        id: 'iterate',
+        code: 'f = iterate step(f) from 0.02',
+        summary: 'Repeat until the value stops moving.',
+        detail:
+          'For the cases where an input depends on the answer: effective length, iterative deflection, a friction factor that sits on both sides of its own equation. Write the step as a function of the variable and give a first guess; the value is fed back in until it settles, and the line says how many rounds that took. Add "within 1e-6" for a looser tolerance. Where `solve` can do the job it is better — it proves an answer exists by bracketing one — but some formulas read naturally as x <- g(x) and rearranging them into a root to find would mean rewriting the engineer\'s own algebra.',
+        example:
+          'Re_D = 1e5\nrr = 0.001\nstep(f) = (-2*log10(rr/3.7 + 2.51/(Re_D*sqrt(f))))^-2\nf = iterate step(f) from 0.02\n',
+        keywords: ['iterate', 'converge', 'fixed point', 'loop', 'colebrook', 'implicit'],
+      },
+      {
+        id: 'solve-two',
+        code: 'b, h = solve A = 20000 mm^2 and r = 2 for b, h',
+        summary: 'Two equations, two unknowns.',
+        detail:
+          'Both variables need a value above the line: those values say what kind of quantity each one is and where to start looking. Everything in between is re-run as the pair is varied, so the unknowns can be several steps up the chain from the equations. If the two equations turn out to say the same thing, the line says so rather than returning one of the infinitely many answers.',
+        example:
+          'b = 100 mm\nh = 100 mm\nA = b*h\nr = h/b\nb, h = solve A = 20000 mm^2 and r = 2 for b, h\n',
+        keywords: ['solve', 'two unknowns', 'simultaneous', 'newton', 'system'],
+      },
+      {
+        id: 'choose',
+        code: 'choice = pick(steel.profile, steel.mass, ok)',
+        summary: 'The lightest row that still passes.',
+        detail:
+          'A table with a verdict column already answers "which of these work". These answer the question after it: `smallest` and `largest` give the value, `pick` gives the label from another column of the same table, and `count_where` says how many passed. Leave the verdict column out to consider every row.',
+        example:
+          'W_req = 500e3 mm^3\ntable steel\n  profile | W_el        | mass\n  IPE200  | 194e3 mm^3  | 22.4 kg/m\n  IPE300  | 557e3 mm^3  | 42.2 kg/m\n  IPE400  | 1160e3 mm^3 | 66.3 kg/m\nend\nok = steel.W_el >= W_req\nchoice = pick(steel.profile, steel.mass, ok)\nm = smallest(steel.mass, ok)\n',
+        keywords: ['pick', 'smallest', 'largest', 'lightest', 'optimise', 'minimise', 'choose', 'section'],
+      },
+      {
+        id: 'statistics',
+        code: 'k = slope(run.x, run.y)',
+        summary: 'Mean, spread and a straight line through a column.',
+        detail:
+          '`mean`, `sd` and `sem` over a named table\'s column, and `slope`, `intercept` and `r2` through two of them. The standard deviation is the sample form, with n − 1 in the denominator, because a set of readings is a sample and not the population. All of them carry units: the slope of millimetres against seconds comes out in mm/s.',
+        example:
+          'table run\n  t     | y\n  1 s   | 2.1 mm\n  2 s   | 3.9 mm\n  3 s   | 6.2 mm\n  4 s   | 7.8 mm\nend\nm = mean(run.y)\ns = sd(run.y)\nk = slope(run.t, run.y)\nq = r2(run.t, run.y)\n',
+        keywords: ['mean', 'average', 'standard deviation', 'sd', 'regression', 'fit', 'slope', 'r2', 'statistics'],
+      },
+      {
+        id: 'interp2',
+        code: 'v = interp2(x, y, t.x, t.y, t.z)',
+        summary: 'Interpolation into a table with two entry arguments.',
+        detail:
+          'A code table printed as a grid — a row per thickness, a column per temperature — arrives here as three equal-length columns, because that is how a table block holds them. The grid is recovered from the values in the first two. Asking for a point outside it is an error rather than an extrapolation, the same as with `interp`.',
+        example:
+          'table k\n  t      | T       | lambda\n  50 mm  | 0 degC  | 0.035 W/(m*K)\n  50 mm  | 40 degC | 0.039 W/(m*K)\n  150 mm | 0 degC  | 0.031 W/(m*K)\n  150 mm | 40 degC | 0.035 W/(m*K)\nend\nv = interp2(100 mm, 20 degC, k.t, k.T, k.lambda)\n',
+        keywords: ['interp2', 'bilinear', 'two dimensional', 'grid', 'table', 'interpolate'],
+      },
+      {
+        id: 'calculus',
+        code: 'W = integral(w, 0 m, 6 m)',
+        summary: 'Area under one of your own functions, and its slope at a point.',
+        detail:
+          '`integral(f, a, b)` integrates a function you defined between two limits, by adaptive Simpson — adaptive because a load that is flat over most of a span and steep at one end is the normal case. `deriv(f, x)` is the slope at a point, by a central difference. Both carry units: integrating kN/m over metres gives kN.',
+        example: 'w(x) = 2 kN/m^2*x\nW = integral(w, 0 m, 6 m) -> kN\ns = deriv(w, 3 m) -> kN/m^2\n',
+        keywords: ['integral', 'integrate', 'area under', 'derivative', 'deriv', 'slope at', 'calculus'],
+      },
+      {
+        id: 'kinds',
+        code: 'A(d: length) = pi*d^2/4',
+        summary: 'Say what kind of quantity a function takes.',
+        detail:
+          'Without it, calling A(20 kN) computes something and the mistake shows up several lines later as a stress in strange units — if it shows up at all. With it the call itself stops, naming the argument and what it expected. The kinds are: ' +
+          'number, ratio, factor, length, area, volume, mass, time, force, moment, pressure, stress, energy, power, temperature, angle, velocity, acceleration, density, frequency, load.',
+        example: 'A(d: length) = pi*d^2/4\na = A(20 mm) -> mm^2\n',
+        keywords: ['dimensions', 'kind', 'type', 'argument', 'function', 'check', 'signature'],
+      },
+    ],
+  },
+
+  {
     id: 'units',
     title: 'Units and numbers',
     prose: [
@@ -259,8 +374,16 @@ export const REFERENCE: Section[] = [
         text: 'Scientific from a hundred thousand up: 1.25·10⁷ mm³, never 12500000 mm³. The same rule serves the document, the inline results and the tables, so a value and its ± never appear in two different forms on one line. Significant figures are set in Settings and apply everywhere.',
       },
       {
-        heading: 'Temperature differences',
-        text: 'A difference of 22 degrees is 22 K, not 22 degC — degC is a point on a scale and K is an interval, and only one of them can be multiplied by a U-value. Write K for differences.',
+        heading: 'Temperature differences are refused, not just discouraged',
+        text: 'A difference of 22 degrees is 22 K, not 22 degC — degC is a point on a scale and K is an interval. Multiplying by an absolute temperature silently drops the 273.15, so 0.17 W/(m²K) × 22 degC gives exactly what 22 K would, and the answer is out by a factor of thirteen with nothing about it looking wrong. So the engine stops that line and says so. Adding and subtracting temperatures is untouched: T_2 − T_1 is the normal way to get a difference, and it still works.',
+      },
+      {
+        heading: 'Units your own field uses',
+        text: 'Write `unit ksi = 1000 psi` and the sheet has it from there on. The definition is checked before anything is defined, so a typo leaves the vocabulary as it was, and defining the same unit twice is harmless because a sheet re-runs as you type. Defining a unit does not change how anything else is displayed — Longhand chooses display units from its own short list per dimension rather than by searching, which is what makes this safe.',
+      },
+      {
+        heading: 'Constants without looking them up',
+        text: 'Write `import "Constants"` for g_n, the gas constant, Stefan–Boltzmann, the standard atmosphere and the rest — exact, because since 2019 they are defined rather than measured — plus nominal densities and elastic moduli. There are deliberately no partial safety factors in it: those depend on the code, the national annex and the design situation, and a stale one sitting in a shared sheet is invisible. Write those in the sheet that uses them, where a checker can see them.',
       },
       {
         heading: 'Symbols read as maths',
@@ -315,6 +438,14 @@ export const REFERENCE: Section[] = [
         keywords: ['solve', 'no solution', 'sign', 'bracket', 'range'],
       },
       {
+        id: 'shadowed-unit',
+        code: 'm = smallest(steel.mass, ok)',
+        summary: 'A variable named like a unit takes that name over.',
+        detail:
+          'Names in a sheet win over units, which is what lets you call a width b without arguing with bytes. The cost is that a variable called m, s, A, N, T or K means your value from that line down, so "42.2 kg/m" afterwards reads as kilograms per your m. It usually shows up as "Units do not match" a line or two later. Give the variable a longer name — m_pick, A_gross — and the unit goes back to meaning what it says.',
+        keywords: ['shadow', 'unit name', 'variable name', 'units do not match', 'clash'],
+      },
+      {
         id: 'outside-table',
         code: 'outside the table',
         summary: 'interp was asked for a point past the last row.',
@@ -340,6 +471,10 @@ export const REFERENCE: Section[] = [
       {
         heading: 'What a printed sheet says about itself',
         text: 'Every printed page carries the build that produced it, and every sheet ends with a line saying that Longhand is a calculation aid and that the author and checker named in the title block remain responsible. A calculation that goes into a submission has to be reproducible and has to say what it does not claim.',
+      },
+      {
+        heading: 'Draft or issued',
+        text: 'A project is a draft until you say otherwise, and a draft prints PRELIMINARY across every page. A draft and an issued calculation otherwise look identical on paper, and that is how a draft ends up in a submission. The Project panel also takes a footer line — your firm, a job number — printed under every sheet beside the build stamp.',
       },
       {
         heading: 'Printing',
@@ -377,6 +512,10 @@ export const REFERENCE: Section[] = [
         text: 'History keeps snapshots of the sheet you are on — one taken automatically every so often while you work, and one whenever you press Save a revision. Opening a snapshot shows a line-by-line diff against the sheet as it stands, which is how "what changed since revision B" gets answered. Restoring takes a snapshot of where you are first, so looking through history can never be the thing that loses work.',
       },
       {
+        heading: 'In from a spreadsheet, out as Markdown',
+        text: 'Symbols → Paste a spreadsheet range turns whatever is on the clipboard into a table block at the cursor: Excel and Google Sheets both copy tab-separated text, and retyping twenty rows of section properties is the most tedious thing about starting a sheet. What comes out is an ordinary table you can edit. Export as Markdown writes the sheet out for a report appendix, with the tables as Markdown tables and the queries marked.',
+      },
+      {
         heading: 'Sharing a sheet by link',
         text: 'Share compresses the whole calculation, figures and all, into the link itself, after the # — the part of an address a browser never sends to a server. So a link opens without an account and without anything being uploaded, and it opens read-only with a button to make a copy. The other side of that: anyone holding the link can read the sheet, and whatever you send it through holds it too. A link is a snapshot, so changing the sheet afterwards does not change what an already-sent link opens.',
       },
@@ -396,6 +535,7 @@ export const REFERENCE: Section[] = [
       { id: 'k-panels', code: 'Alt + P / H / ,', summary: 'Project, Help, Settings.' },
       { id: 'k-share', code: 'Alt + S', summary: 'Share this sheet as a link.' },
       { id: 'k-history', code: 'Alt + R', summary: 'History and revisions.' },
+      { id: 'k-symbols', code: 'Alt + Y', summary: 'Symbols — every name, and what depends on it.' },
       { id: 'k-save', code: 'Cmd/Ctrl + S', summary: 'Save this sheet as a file.' },
       { id: 'k-print', code: 'Cmd/Ctrl + P', summary: 'Print.' },
       { id: 'k-escape', code: 'Escape', summary: 'Close whatever is open.' },

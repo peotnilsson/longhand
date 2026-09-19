@@ -61,7 +61,8 @@ page.on('pageerror', (e) => bad.push('PAGE ERROR: ' + e.message))
  * built so that nothing depends on it. So a failed request for it is not a
  * failure of the page.
  */
-const optional = (text) => /plausible|ERR_TUNNEL|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|net::ERR_BLOCKED/i.test(text)
+const optional = (text) =>
+  /plausible|ERR_TUNNEL|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_BLOCKED|ERR_FAILED/i.test(text)
 page.on('console', (m) => {
   if (m.type() === 'error' && !optional(m.text())) bad.push('CONSOLE: ' + m.text())
 })
@@ -198,7 +199,9 @@ const ids = async () => (await page.evaluate(() => JSON.parse(localStorage.getIt
 await page.click('button:has-text("Project")')
 await page.waitForSelector('.panel')
 {
-  const sel = await page.$('.panel select')
+  // By label, not by position: the project panel has more than one select now,
+  // and "the first one" is exactly the kind of thing that quietly moves.
+  const sel = await page.$('.panel select[aria-label^="Move this sheet"]')
   await sel.selectOption('p2')
   await page.waitForTimeout(250)
   const store = await page.evaluate(() => JSON.parse(localStorage.getItem('longhand:store')))
@@ -1151,6 +1154,102 @@ for (const [theme, width, height, tag] of [
     check(`${path}: with automatic page capture off`,
       /autoCapturePageviews:\s*false/.test(html), path)
   }
+}
+
+// 34. the new maths, in the app rather than in a unit test
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Maths', source: [
+      '# Maths',
+      'import "Constants"',
+      'unit kgf = 9.80665 N',
+      'F = 100 kgf -> N',
+      'b = 300 mm +- 2 mm',
+      'h = 500 mm +- 10 mm',
+      'W = b*h^2/6',
+      'M_Ed = 250 kN*m',
+      'sigma = M_Ed/W -> MPa   // clause 6.2  ?? is 250 the right load case',
+      'f_y = 355 MPa',
+      'sigma <= f_y',
+      '// The stress is @sigma',
+      'page break',
+      'w_load = 12 kg*g_n -> N',
+    ].join('\n') },
+  ] }], activeSheetId: 's1' })
+
+  const text = (await page.$eval('.output-pane', (e) => e.textContent)).replace(/\s+/g, ' ')
+  check('maths: a unit the sheet defined is used', /980\.7 N/.test(text), text.slice(0, 90))
+  check('maths: the constants sheet is importable', /117\.7 N|117\.6/.test(text),
+    text.slice(-90))
+  check('maths: no errors anywhere', (await page.$$('.error')).length === 0)
+
+  const query = await page.$('.query')
+  check('a reviewer query prints beside the line',
+    query !== null && /right load case/.test(await query.textContent()))
+  check('and is kept apart from the note',
+    /clause 6\.2/.test(await page.$eval('.line-note', (e) => e.textContent)))
+
+  const equations = await page.$$eval('.equation', (els) => els.map((e) => e.textContent))
+  check('every defining line is numbered', equations.length >= 6, JSON.stringify(equations.slice(0, 4)))
+  check('and a reference resolves to the number',
+    /The stress is eq\. \d+/.test(text), text.match(/The stress is[^.]*\./)?.[0] ?? '')
+
+  check('a page break is in the document', (await page.$$('.page-break')).length === 1)
+
+  // Uncertainty shares now name the measurements rather than the step between.
+  const shares = await page.$$eval('.tolerance .shares', (els) => els.map((e) => e.textContent))
+  const onSigma = shares.find((share) => /b |h /.test(share)) ?? ''
+  check('uncertainty names the measurements, not the middle step',
+    onSigma.includes('h') && !onSigma.includes('W'), JSON.stringify(shares))
+}
+
+// 35. the symbols panel
+{
+  await page.click('button:has-text("Symbols")')
+  await page.waitForSelector('.symbols')
+  const names = await page.$$eval('.symbols code', (els) => els.map((e) => e.textContent))
+  check('symbols: every name the sheet defines', names.includes('W') && names.includes('sigma'),
+    JSON.stringify(names))
+
+  await page.click('.symbols li:has(code:text-is("b")) .symbol-head')
+  await page.waitForSelector('.symbol-body')
+  const traced = (await page.$eval('.symbol-body', (e) => e.textContent)).replace(/\s+/g, ' ')
+  check('symbols: it says what a change would redo', /W/.test(traced) && /sigma/.test(traced),
+    traced.slice(0, 120))
+  await page.click('button:has-text("Symbols")')
+}
+
+// 36. a draft says so on paper and nowhere else
+{
+  const mark = await page.$('.watermark')
+  check('draft: the watermark is in the document', mark !== null)
+  check('draft: and stays off the screen',
+    (await page.$eval('.watermark', (e) => getComputedStyle(e).display)) === 'none')
+  check('draft: the page is marked as one',
+    (await page.$$('.sheet-page.draft')).length > 0)
+
+  await page.click('button:has-text("Project")')
+  await page.waitForSelector('.panel')
+  await page.selectOption('.panel select[aria-label="Project status"]', 'issued')
+  await page.waitForTimeout(300)
+  check('issued: the watermark goes', (await page.$('.watermark')) === null)
+
+  await page.fill('.panel input[placeholder="Your firm, job number"]', 'Nilsson Engineering')
+  await page.waitForTimeout(300)
+  check('the footer carries the firm line',
+    /Nilsson Engineering/.test(await page.$eval('.sheet-foot', (e) => e.textContent)))
+  await page.click('button:has-text("Project")')
+}
+
+// 37. the temperature that used to be a silent wrong answer
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Wall', source: 'U = 0.17 W/(m^2*K)\ndT = 22 degC\nq = U*dT\n' },
+  ] }], activeSheetId: 's1' })
+  const message = await page.$eval('.error .error-message', (e) => e.textContent)
+  check('an absolute temperature is refused, not quietly used',
+    /not a difference/.test(message), message.slice(0, 80))
+  check('and the message says what to write instead', /22 K/.test(message))
 }
 
 await browser.close()

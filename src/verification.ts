@@ -548,6 +548,250 @@ s_closed = 190 mm^2
     mode: 'worst',
     mustRead: [{ of: 'z', contains: '± 190 mm^2' }],
   },
+  {
+    id: 'temperature-difference',
+    title: 'A temperature difference is not a temperature',
+    field: 'Thermal',
+    against: 'q = U·ΔT with ΔT in kelvin, against the same product worked by hand',
+    source: `# Heat flow through a wall
+
+U  = 0.17 W/(m^2*K)
+dT = 22 K
+
+q = U*dT -> W/m^2
+
+// 0.17 x 22 = 3.74 W/m^2
+q_closed = 3.74 W/m^2
+abs(q - q_closed)/q_closed <= 1e-12
+
+// The same difference written as an absolute temperature would be 295.15 K,
+// and the answer would be out by a factor of thirteen. Longhand refuses that
+// line rather than computing it, which is why this case can only be written
+// the right way round.
+dT_absolute = 22 degC -> K
+T_closed = 295.15 K
+abs(dT_absolute - T_closed)/T_closed <= 1e-12
+`,
+  },
+  {
+    id: 'regression',
+    title: 'Least squares through four readings',
+    field: 'Mathematics',
+    against: 'The closed form: slope = Sxy/Sxx, intercept = ȳ − slope·x̄',
+    source: `# A measurement series
+
+table run
+  t     | y
+  1 s   | 2.1 mm
+  2 s   | 3.9 mm
+  3 s   | 6.2 mm
+  4 s   | 7.8 mm
+end
+
+k = slope(run.t, run.y) -> mm/s
+c = intercept(run.t, run.y) -> mm
+q = r2(run.t, run.y)
+
+// By hand: x-bar = 2.5, y-bar = 5.0, Sxy = 9.70, Sxx = 5.00
+k_closed = 1.94 mm/s
+abs(k - k_closed)/k_closed <= 1e-12
+
+// c = 5.0 - 1.94 x 2.5 = 0.15
+c_closed = 0.15 mm
+abs(c - c_closed)/c_closed <= 1e-9
+
+// r2 = Sxy^2/(Sxx Syy) = 94.09 / (5.00 x 18.90)
+q_closed = 0.99566138
+abs(q - q_closed)/q_closed <= 1e-7
+
+// and the sample standard deviation, n-1 in the denominator
+s = sd(run.y) -> mm
+s_closed = 2.50998008 mm
+abs(s - s_closed)/s_closed <= 1e-8
+`,
+  },
+  {
+    id: 'bilinear',
+    title: 'Interpolation in two directions',
+    field: 'Mathematics',
+    against: 'Bilinear interpolation at the centre of a cell is the mean of its four corners',
+    source: `# A conductivity table with two entry arguments
+
+table k
+  t      | T       | lambda
+  50 mm  | 0 degC  | 0.035 W/(m*K)
+  50 mm  | 40 degC | 0.039 W/(m*K)
+  150 mm | 0 degC  | 0.031 W/(m*K)
+  150 mm | 40 degC | 0.035 W/(m*K)
+end
+
+// The middle of the cell: (0.035 + 0.039 + 0.031 + 0.035)/4
+middle = interp2(100 mm, 20 degC, k.t, k.T, k.lambda) -> W/(m*K)
+middle_closed = 0.035 W/(m*K)
+abs(middle - middle_closed)/middle_closed <= 1e-12
+
+// Halfway along one axis only: (0.035 + 0.031)/2
+edge = interp2(100 mm, 0 degC, k.t, k.T, k.lambda) -> W/(m*K)
+edge_closed = 0.033 W/(m*K)
+abs(edge - edge_closed)/edge_closed <= 1e-12
+
+// and a corner comes back exactly
+corner = interp2(50 mm, 40 degC, k.t, k.T, k.lambda) -> W/(m*K)
+abs(corner - 0.039 W/(m*K))/(0.039 W/(m*K)) <= 1e-12
+`,
+  },
+  {
+    id: 'integral',
+    title: 'Area under a triangular load',
+    field: 'Mathematics',
+    against: 'A triangle is half its base times its height, which integration must reproduce',
+    source: `# Total load under a load that grows along the span
+
+L = 6 m
+w(x) = 2 kN/m^2*x
+
+W = integral(w, 0 m, L) -> kN
+
+// The load reaches 12 kN/m at the far end, so the area is 12 x 6 / 2
+W_closed = 36 kN
+abs(W - W_closed)/W_closed <= 1e-9
+
+// and the slope of the load is the constant it was built from
+s = deriv(w, 3 m) -> kN/m^2
+abs(s - 2 kN/m^2)/(2 kN/m^2) <= 1e-6
+`,
+  },
+  {
+    id: 'iteration',
+    title: 'Colebrook by iteration and by bisection',
+    field: 'Fluids',
+    against: 'The same equation solved two different ways must give the same friction factor',
+    source: `# The friction factor, two ways
+
+Re_D = 1e5
+rr = 0.001
+
+// As a fixed point: guess, compute, write the new value over the old one
+step(f) = (-2*log10(rr/3.7 + 2.51/(Re_D*sqrt(f))))^-2
+f_iterated = iterate step(f_iterated) from 0.02
+
+// And as a root to bracket and bisect
+f = 0.02
+lhs = 1/sqrt(f)
+rhs = -2*log10(rr/3.7 + 2.51/(Re_D*sqrt(f)))
+f_solved = solve lhs = rhs for f
+
+abs(f_iterated - f_solved)/f_solved <= 1e-6
+
+// Worked by hand to convergence: 0.0221745
+f_closed = 0.0221745
+abs(f_iterated - f_closed)/f_closed <= 1e-5
+`,
+  },
+  {
+    id: 'two-unknowns',
+    title: 'Two equations, two unknowns',
+    field: 'Structures',
+    against: 'A = bh and h = 2b rearrange by hand to b = √(A/2)',
+    source: `# A section of a given area and a given proportion
+
+b = 100 mm
+h = 100 mm
+
+A = b*h
+r = h/b
+
+b, h = solve A = 20000 mm^2 and r = 2 for b, h
+
+// By hand: b = sqrt(20000/2) = 100 mm, h = 200 mm
+b_closed = 100 mm
+h_closed = 200 mm
+abs(b - b_closed)/b_closed <= 1e-6
+abs(h - h_closed)/h_closed <= 1e-6
+
+// and both equations really do hold at the answer
+abs(b*h - 20000 mm^2)/(20000 mm^2) <= 1e-6
+`,
+  },
+  {
+    id: 'lightest-section',
+    title: 'The lightest section that still passes',
+    field: 'Structures',
+    against: 'Reading the table by eye: only two rows pass, and the lighter of those is IPE300',
+    source: `# Choosing a section
+
+M_Ed = 150 kN*m
+f_y = 275 MPa
+W_req = M_Ed/f_y -> mm^3
+
+table steel
+  profile | W_el        | mass
+  IPE200  | 194e3 mm^3  | 22.4 kg/m
+  IPE300  | 557e3 mm^3  | 42.2 kg/m
+  IPE400  | 1160e3 mm^3 | 66.3 kg/m
+end
+
+// 150e3 / 275e6 = 5.4545e-4 m^3 = 545.45e3 mm^3
+W_closed = 545454.5 mm^3
+abs(W_req - W_closed)/W_closed <= 1e-6
+
+ok = steel.W_el >= W_req
+n = count_where(ok)
+
+// IPE200 is too small; the other two pass
+abs(n - 2) <= 1e-12
+
+// Called m_pick rather than m: a variable named m would shadow the metre for
+// every line below it, and "42.2 kg/m" would then mean kg per 42.2 kg/m.
+m_pick = smallest(steel.mass, ok)
+abs(m_pick - 42.2 kg/m)/(42.2 kg/m) <= 1e-12
+
+choice = pick(steel.profile, steel.mass, ok)
+`,
+  },
+  {
+    id: 'correlated',
+    title: 'Two measurements that move together',
+    field: 'Uncertainty',
+    against: 'Perfectly correlated errors add directly rather than in quadrature',
+    source: `# The same instrument used twice
+
+x = 100 mm +- 1 mm
+y = 100 mm +- 1 mm
+
+correlate x and y by 1
+
+s = x + y -> mm
+
+// Independent, the two would combine as sqrt(1 + 1) = 1.414 mm. Moving exactly
+// together they add: 1 + 1 = 2 mm. The value itself is unchanged.
+s_closed = 200 mm
+abs(s - s_closed)/s_closed <= 1e-12
+`,
+    mustRead: [{ of: 's', contains: '± 2 mm' }],
+  },
+  {
+    id: 'user-unit',
+    title: 'A unit the sheet defined for itself',
+    field: 'Units',
+    against: '1 kgf = 9.80665 N, which is standard gravity times one kilogram',
+    source: `# A unit this sheet needs and the engine does not ship
+
+unit kgf = 9.80665 N
+
+F = 100 kgf -> N
+
+// 100 x 9.80665, and standard gravity is defined exactly
+F_closed = 980.665 N
+abs(F - F_closed)/F_closed <= 1e-12
+
+// Defining a unit must not change how anything else is read
+M = 250 kN*m
+W = 1.25e7 mm^3
+sigma = M/W -> MPa
+abs(sigma - 20 MPa)/(20 MPa) <= 1e-12
+`,
+  },
 ]
 
 export const FIELDS: Field[] = [

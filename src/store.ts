@@ -33,6 +33,15 @@ export interface ProjectMeta {
   author: string
   checkedBy: string
   revision: string
+  /**
+   * A draft prints with PRELIMINARY across every page. A calculation that is
+   * still being worked on and a calculation that has been issued look
+   * identical on paper otherwise, and that is how a draft ends up in a
+   * submission.
+   */
+  status?: 'draft' | 'issued'
+  /** A line of the firm's own, printed under every sheet. */
+  footer?: string
 }
 
 export interface Project {
@@ -75,6 +84,8 @@ export const emptyMeta = (): ProjectMeta => ({
   author: '',
   checkedBy: '',
   revision: 'A',
+  status: 'draft',
+  footer: '',
 })
 
 export const defaultSettings = (): Settings => ({ theme: 'system', author: '', project: '' })
