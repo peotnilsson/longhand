@@ -38,8 +38,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Install a browser for the end-to-end pass
-        run: npx --yes playwright@latest install --with-deps chromium
+      # Playwright is not a dependency of the app — it is only needed for this
+      # pass — so it is installed without touching package.json, exactly as the
+      # README says to do it locally.
+      - name: Install Playwright and a browser
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
 
       - name: Serve the build and run the browser checks
         run: |

@@ -6,13 +6,23 @@
  *
  * Writes verify-light.png, verify-dark.png and verify-phone.png to look at.
  */
+import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 
 const ok = []
 const bad = []
 const check = (name, pass, detail = '') => (pass ? ok : bad).push(`${name}${detail ? ' — ' + detail : ''}`)
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+/**
+ * The sandbox this was written in ships a browser at a fixed path and blocks
+ * the download Playwright would otherwise do. A GitHub runner has neither, so
+ * the path is used only when it is actually there and Playwright picks its own
+ * browser everywhere else.
+ */
+const bundled = '/opt/pw-browsers/chromium'
+const browser = await chromium.launch(
+  existsSync(bundled) ? { executablePath: bundled } : {},
+)
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
 page.on('pageerror', (e) => bad.push('PAGE ERROR: ' + e.message))
 page.on('console', (m) => { if (m.type() === 'error') bad.push('CONSOLE: ' + m.text()) })
