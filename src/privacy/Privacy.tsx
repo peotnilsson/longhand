@@ -17,8 +17,6 @@ import './privacy.css'
  * project is in a position to make.
  */
 
-const COUNTING_DOMAIN: string = import.meta.env?.VITE_ANALYTICS_DOMAIN ?? ''
-
 export default function Privacy() {
   useEffect(() => {
     start()
@@ -83,40 +81,36 @@ export default function Privacy() {
           </p>
 
           <h2>What is counted</h2>
-          {COUNTING_DOMAIN ? (
-            <>
-              <p>
-                Longhand counts a small number of anonymous events so that one question can be
-                answered: does anyone come back? Each one sends the name of the event, the page's
-                origin and path with the query and the <code>#</code> part removed, the origin of
-                the site that referred you, and at most a few fixed labels such as{' '}
-                <code>week</code> or <code>later</code>. That is the whole payload, and it is
-                built by Longhand rather than by a third-party script, which is what guarantees
-                a share link's contents can never be inside it.
-              </p>
-              <p>
-                No cookie is set, no identifier is stored or sent, and nothing you type is ever
-                included — not a sheet, not a formula, not a file name, not a sheet's title. The
-                counts go to {COUNTING_DOMAIN} via Plausible Analytics, which receives your IP
-                address as part of the request, as every web request does, and does not store it.
-                Do Not Track and Global Privacy Control are honoured, and Settings → Data has a
-                switch that turns even this off.
-              </p>
-            </>
-          ) : (
-            <p>
-              This build counts nothing at all. The code for anonymous counting is present but
-              disabled: with no analytics domain configured, it makes no network request of any
-              kind. If that changes, it will be described here before it ships, and there will be
-              a switch in Settings → Data to turn it off.
-            </p>
-          )}
+          <p>
+            Longhand counts a small number of anonymous events so that one question can be
+            answered: does anyone come back? Each one carries the name of the event, this page's
+            origin and path — with the query and everything after the <code>#</code> removed —
+            and at most a few fixed labels such as <code>week</code> or <code>later</code>. That
+            is the whole payload.
+          </p>
+          <p>
+            The counting is Plausible Analytics, and its script is loaded by this site with
+            automatic page capture switched off. That setting is the important one: left on, the
+            script would report the full address of the page, and on this site the part of the
+            address after the <code>#</code> is the calculation itself. With it off the script
+            sends nothing on its own, and every event is handed to it with an address Longhand
+            builds from the origin and the path alone.
+          </p>
+          <p>
+            No cookie is set, no identifier is stored or sent, and nothing you type is ever
+            included — not a sheet, not a formula, not a file name, not a sheet's title. Plausible
+            receives your IP address as part of the request, as every web request does, and does
+            not store it. Do Not Track and Global Privacy Control are honoured, and Settings →
+            Data has a switch that stops even this. Blocking the script in your browser also
+            stops it, and nothing else on the site depends on it.
+          </p>
 
           <h2>What the site itself requests</h2>
           <p>
             The app, the fonts it uses and the mathematics rendering are all served from this
-            domain. There is no content delivery network, no font service, no tag manager and no
-            embedded third-party code. The site is hosted on Vercel, whose servers necessarily
+            domain. There is no content delivery network, no font service and no tag manager; the
+            counting script described above is the only third-party code on the page. The site is
+            hosted on Vercel, whose servers necessarily
             see the ordinary details of any web request — your IP address, your browser's user
             agent, and which page you asked for — in order to serve it. Nothing in your
             calculation is among those details.

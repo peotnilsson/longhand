@@ -25,7 +25,16 @@ const browser = await chromium.launch(
 )
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
 page.on('pageerror', (e) => bad.push('PAGE ERROR: ' + e.message))
-page.on('console', (m) => { if (m.type() === 'error') bad.push('CONSOLE: ' + m.text()) })
+/**
+ * The counting script is third-party and optional: an ad blocker, an offline
+ * machine or a locked-down CI sandbox will fail to load it, and the app is
+ * built so that nothing depends on it. So a failed request for it is not a
+ * failure of the page.
+ */
+const optional = (text) => /plausible|ERR_TUNNEL|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|net::ERR_BLOCKED/i.test(text)
+page.on('console', (m) => {
+  if (m.type() === 'error' && !optional(m.text())) bad.push('CONSOLE: ' + m.text())
+})
 
 const seed = {
   version: 4,
@@ -1015,19 +1024,62 @@ for (const [theme, width, height, tag] of [
   await privacy.close()
 }
 
-// 32. nothing reaches a third party without being asked
+// 32. the counting script is there, and it never sees a calculation
 {
   const clean = await browser.newPage({ viewport: { width: 1400, height: 900 } })
-  const external = []
+  const outgoing = []
   clean.on('request', (request) => {
     const url = request.url()
-    if (!url.startsWith('http://localhost:4173') && !url.startsWith('data:')) external.push(url)
+    if (url.startsWith('http://localhost:4173') || url.startsWith('data:')) return
+    outgoing.push({ url, body: request.postData() ?? '' })
   })
+
+  // Make a share link, then open it, which is the one page whose address
+  // contains a whole sheet.
   await clean.goto('http://localhost:4173/app')
   await clean.waitForSelector('.sheet-page')
-  await clean.waitForTimeout(800)
-  check('the app makes no third-party request', external.length === 0, JSON.stringify(external))
+  await clean.click('button:has-text("Share")')
+  await clean.click('button:has-text("Copy a link")')
+  await clean.waitForSelector('.link-box')
+  const link = await clean.$eval('.link-box', (e) => e.value)
+  const fragment = link.slice(link.indexOf('#s=') + 3)
+
+  await clean.goto(link)
+  await clean.waitForSelector('.shared-bar')
+  await clean.waitForTimeout(1200)
+
+  const hosts = [...new Set(outgoing.map((request) => new URL(request.url).host))]
+  check('the only third party on the page is the counter',
+    hosts.every((host) => host === 'plausible.io'), JSON.stringify(hosts))
+  check('the counter is actually requested', hosts.includes('plausible.io'),
+    JSON.stringify(hosts))
+
+  // The whole reason autoCapturePageviews is off: the default script reports
+  // location.href, and here location.href is a calculation.
+  const sample = fragment.slice(0, 24)
+  const leaked = outgoing.filter(
+    (request) => request.url.includes(sample) || request.body.includes(sample),
+  )
+  check('no request carries the shared sheet', leaked.length === 0,
+    JSON.stringify(leaked.map((request) => request.url.slice(0, 120))))
+
+  const hashed = outgoing.filter(
+    (request) => request.url.includes('%23') || request.body.includes('#'),
+  )
+  check('no request carries a fragment at all', hashed.length === 0,
+    JSON.stringify(hashed.map((request) => request.url.slice(0, 120))))
   await clean.close()
+}
+
+// 33. auto-capture stays off, on every page
+{
+  for (const path of ['/', '/app', '/docs', '/verification', '/privacy']) {
+    const html = await (await fetch('http://localhost:4173' + path)).text()
+    check(`${path}: the counting script is loaded`,
+      html.includes('plausible.io/js/'), path)
+    check(`${path}: with automatic page capture off`,
+      /autoCapturePageviews:\s*false/.test(html), path)
+  }
 }
 
 await browser.close()

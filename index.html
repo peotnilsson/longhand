@@ -17,6 +17,22 @@
       content="An engineering calculation sheet that shows its work: formula, numbers substituted in, then the result."
     />
     <meta property="og:type" content="website" />
+    <!-- Privacy-friendly analytics by Plausible.
+         autoCapturePageviews is off on purpose: the default script reports
+         location.href, and on this site a share link's fragment IS the
+         calculation. src/analytics.ts sends each pageview with a url it builds
+         from the origin and pathname only, so the fragment and the query
+         never leave the browser. Do not turn auto-capture back on. -->
+    <script defer src="https://plausible.io/js/pa-VgWMHO1unpfH_PeQA1NgK.js"></script>
+    <script>
+      window.plausible =
+        window.plausible ||
+        function () {
+          ;(plausible.q = plausible.q || []).push(arguments)
+        }
+      plausible.init = plausible.init || function (o) { plausible.o = o || {} }
+      plausible.init({ autoCapturePageviews: false })
+    </script>
   </head>
   <body>
     <div id="root"></div>

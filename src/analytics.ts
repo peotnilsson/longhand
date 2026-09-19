@@ -8,22 +8,25 @@
  * cookie, no identifier, no session token and nothing that could be joined back
  * to a person.
  *
- * Two deliberate decisions behind that:
+ * Plausible's script is loaded by the five HTML pages with
+ * `autoCapturePageviews: false`. That flag is the whole design: left on, the
+ * script reports `location.href`, and on this site a share link's fragment IS
+ * the calculation. With it off, the script sends nothing by itself and every
+ * event goes through `track()` below, which supplies a `url` built from the
+ * origin and the pathname. There is no code path that puts the query or the
+ * fragment back.
  *
- * 1. No third-party script tag. An analytics script sends `location.href`,
- *    which on this site would include a share link's hash — and a share link's
- *    hash *is* the calculation. Posting a payload we construct ourselves is the
- *    only way to be certain that never happens, so `pageUrl()` below drops the
- *    query and the hash and there is no code path that puts them back.
- *
- * 2. Off unless a domain is configured. With no VITE_ANALYTICS_DOMAIN, every
- *    function here returns without making a request, which is what happens on
- *    localhost, in the tests and in any fork.
+ * If the script is blocked, absent or still loading, every function here
+ * returns without doing anything — which is also what happens on localhost and
+ * in the tests.
  */
 
-const DOMAIN: string = import.meta.env?.VITE_ANALYTICS_DOMAIN ?? ''
-const ENDPOINT: string =
-  import.meta.env?.VITE_ANALYTICS_HOST ?? 'https://plausible.io/api/event'
+type Plausible = (name: string, options?: { url?: string; props?: Record<string, string> }) => void
+
+const plausible = (): Plausible | null => {
+  const found = (window as unknown as { plausible?: Plausible }).plausible
+  return typeof found === 'function' ? found : null
+}
 
 const OPT_OUT_KEY = 'longhand:no-analytics'
 const FIRST_SEEN_KEY = 'longhand:first-seen'
@@ -89,8 +92,8 @@ function signalsNo(): boolean {
 }
 
 export function enabled(): boolean {
-  if (!DOMAIN) return false
   if (typeof window === 'undefined') return false
+  if (!plausible()) return false
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return false
   }
@@ -98,62 +101,96 @@ export function enabled(): boolean {
 }
 
 /**
- * Origin and path, nothing else. A share link lives entirely in the hash and
- * `?example=beam` is in the query, so both are dropped here rather than
- * filtered later.
+ * The keys a prop may have, and the words a string prop may be.
+ *
+ * Both are allowlists rather than patterns, and that is the whole point. The
+ * first version of this filter accepted any short string of letters, which a
+ * test immediately showed to be useless: "Client X foundation" is nineteen
+ * letters and spaces and would have sailed through. A pattern describes what
+ * content looks like; a list of nine words cannot be talked into carrying a
+ * sheet name, a formula or a file name however a future call site is written.
+ *
+ * Numbers are safe because they are counted things — how many sheets, how many
+ * lines — and a number cannot be prose.
  */
-function pageUrl(): string {
-  return `${window.location.origin}${window.location.pathname}`
-}
+const PROP_KEYS = [
+  'seen',
+  'to',
+  'from',
+  'paged',
+  'long',
+  'sheets',
+  'lines',
+  'passed',
+  'failed',
+] as const
 
-/**
- * Only short enumerated labels survive. Passing a sheet name, a formula or a
- * file name into a prop would be the one way this module could leak content,
- * so the door is shut here rather than at each call site.
- */
+const PROP_WORDS = [
+  'first',
+  'week',
+  'month',
+  'later',
+  'github',
+  'email',
+  'share',
+  'yes',
+  'no',
+] as const
+
 export function cleanProps(props: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(props)) {
-    if (!/^[a-z][a-z0-9_]{0,23}$/.test(key)) continue
+    if (!(PROP_KEYS as readonly string[]).includes(key)) continue
     if (typeof value === 'number' && Number.isFinite(value)) {
-      out[key] = String(value)
+      out[key] = String(Math.round(value))
       continue
     }
     if (typeof value === 'boolean') {
       out[key] = value ? 'yes' : 'no'
       continue
     }
-    if (typeof value === 'string' && /^[a-z0-9 +._-]{1,24}$/i.test(value)) {
+    if (typeof value === 'string' && (PROP_WORDS as readonly string[]).includes(value)) {
       out[key] = value
-      continue
     }
   }
   return out
 }
 
-export function track(name: EventName, props: Record<string, unknown> = {}): void {
-  if (!enabled()) return
-  const body = JSON.stringify({
+export interface Payload {
+  name: string
+  url: string
+  props: Record<string, string>
+}
+
+/**
+ * The exact arguments that go to Plausible, built where a test can see them.
+ *
+ * This is the single most important function in the module. Plausible's script
+ * would otherwise report `location.href`, and on this site that would put an
+ * entire shared calculation into a third party's logs. Assembling the url from
+ * origin and pathname rather than trimming an href means there is no version
+ * of this that "forgets" to strip something.
+ */
+export function payloadFor(
+  name: EventName,
+  props: Record<string, unknown>,
+  location: { origin: string; pathname: string },
+): Payload {
+  return {
     name,
-    domain: DOMAIN,
-    url: pageUrl(),
-    // The referrer is whole-origin only: which site sent them, never which page.
-    referrer: document.referrer ? new URL(document.referrer).origin : '',
+    url: `${location.origin}${location.pathname}`,
     props: cleanProps(props),
-  })
+  }
+}
+
+export function track(name: EventName, props: Record<string, unknown> = {}): void {
+  const send = plausible()
+  if (!send || !enabled()) return
+  const payload = payloadFor(name, props, window.location)
   try {
-    void fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-      credentials: 'omit',
-      mode: 'no-cors',
-    }).catch(() => {
-      /* a blocked or failed count is not worth a console message */
-    })
+    send(payload.name, { url: payload.url, props: payload.props })
   } catch {
-    /* nothing to do */
+    /* a count that fails is never worth an error in someone's calculation */
   }
 }
 
