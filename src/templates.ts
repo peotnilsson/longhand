@@ -1,21 +1,20 @@
 /**
- * Sheets to start from, instead of an empty page.
+ * The example project a browser that has never opened Longhand is given.
  *
  * A blank sheet is the worst first impression a calculation tool can make:
  * everything it can do is invisible, and the first thing you have to do is
- * remember syntax you have never seen. So the first sheet Longhand ever opens
- * is the starter below — short enough to read in twenty seconds, complete
- * enough to be a real check, and written so that every line is worth editing
- * rather than deleting.
+ * remember syntax you have never seen. So the first thing anyone sees is a
+ * project of finished sheets — short ones, each showing a different way of
+ * working — with "Start here" open.
  *
- * The same list is offered whenever a sheet is added, because the second sheet
- * has the same problem as the first.
+ * They are examples, not a wizard. Adding a sheet gives you an empty one, the
+ * way it always did; these are here to be read, copied from and deleted.
  */
-export interface Template {
+export interface Example {
   id: string
-  /** The name the new sheet gets. */
+  /** The sheet's name in the sidebar. */
   name: string
-  /** One line: when you would pick this one. */
+  /** One line: what this one shows. */
   summary: string
   source: string
 }
@@ -102,20 +101,6 @@ sigma <= f_yd
 // tables, your own functions, plots, tolerances, solving backwards.
 `
 
-const SKELETON_SOURCE = `# New calculation
-
-// Purpose, references, and anything the checker needs to know before
-// reading the numbers.
-
-## Inputs
-
-## Calculation
-
-## Checks
-
-## Conclusion
-`
-
 const STUDY_SOURCE = `# Parameter study
 
 M_Ed = 250 kN*m
@@ -183,24 +168,12 @@ s_req = M_Ed/W_req  -> MPa
 s_req <= f_yd
 `
 
-export const TEMPLATES: Template[] = [
+export const EXAMPLE_SHEETS: Example[] = [
   {
     id: 'starter',
     name: 'Start here',
     summary: 'A short worked check, with the language explained as it goes.',
     source: STARTER_SOURCE,
-  },
-  {
-    id: 'blank',
-    name: 'New calculation',
-    summary: 'An empty sheet with nothing but a title.',
-    source: '# New calculation\n\n',
-  },
-  {
-    id: 'skeleton',
-    name: 'Inputs, calculation, checks',
-    summary: 'The headings a sheet usually wants, and nothing else.',
-    source: SKELETON_SOURCE,
   },
   {
     id: 'study',
@@ -228,8 +201,14 @@ export const TEMPLATES: Template[] = [
   },
 ]
 
-/** What a browser that has never opened Longhand before is given. */
-export const STARTER = TEMPLATES[0]
+/** The sheet that is open when the project appears. */
+export const STARTER = EXAMPLE_SHEETS[0]
 
-export const findTemplate = (id: string): Template | undefined =>
-  TEMPLATES.find((template) => template.id === id)
+/** The name of the project they all live in. */
+export const EXAMPLE_PROJECT = 'Example project'
+
+/** What "+ Sheet" gives you: a clean page with a title to overwrite. */
+export const BLANK_SHEET = '# New calculation\n\n'
+
+export const findExampleSheet = (id: string): Example | undefined =>
+  EXAMPLE_SHEETS.find((example) => example.id === id)

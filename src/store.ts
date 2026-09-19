@@ -1,5 +1,5 @@
 import type { ToleranceMode } from './engine'
-import { STARTER } from './templates'
+import { EXAMPLE_PROJECT, EXAMPLE_SHEETS } from './templates'
 
 /**
  * A project is the unit engineers deliver: a set of sheets sharing one title
@@ -108,19 +108,23 @@ export function newProject(name: string, meta: Partial<ProjectMeta> = {}): Proje
 /**
  * What a browser that has never opened Longhand before is handed.
  *
- * It used to be the demonstration sheet — fifty lines showing off every
+ * It used to be one sheet: the demonstration, fifty lines showing off every
  * construct at once, which is a fine advertisement and a terrible starting
- * point: there is nothing in it you would keep, so the first thing anyone did
- * was select all and delete. The starter template is a real check, short
- * enough to read before deciding whether to edit it or start again, and the
- * demonstration sheet is still one keystroke away under "+ Sheet".
+ * point — there is nothing in it you would keep, so the first thing anyone did
+ * was select all and delete. Now it is a project of short finished sheets, one
+ * per way of working, with the shortest open. They are there to be read and
+ * deleted, and a new sheet is still an empty one.
  */
 export function freshStore(): Store {
   const project: Project = {
     id: newId(),
-    name: 'Example project',
+    name: EXAMPLE_PROJECT,
     meta: emptyMeta(),
-    sheets: [{ id: newId(), name: STARTER.name, source: STARTER.source }],
+    sheets: EXAMPLE_SHEETS.map((example) => ({
+      id: newId(),
+      name: example.name,
+      source: example.source,
+    })),
   }
   return {
     version: 4,

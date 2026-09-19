@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { evaluateSheet } from './engine'
-import { EVENTS, cleanProps } from './analytics'
-import { STARTER, TEMPLATES, findTemplate } from './templates'
+import { BLANK_SHEET, EXAMPLE_PROJECT, EXAMPLE_SHEETS, STARTER, findExampleSheet } from './templates'
 import { freshStore } from './store'
 
 const linesOf = (source: string) => evaluateSheet(source)
@@ -11,51 +10,66 @@ const errorsIn = (source: string): string[] =>
     .filter((line) => line.kind === 'error')
     .map((line) => (line.kind === 'error' ? `${line.source}: ${line.message}` : ''))
 
-describe('the templates', () => {
+describe('the example sheets', () => {
   it('has a unique id and a name for each', () => {
-    const ids = TEMPLATES.map((template) => template.id)
+    const ids = EXAMPLE_SHEETS.map((example) => example.id)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const template of TEMPLATES) {
-      expect(template.name.length, template.id).toBeGreaterThan(0)
-      expect(template.summary.length, template.id).toBeGreaterThan(10)
-      expect(findTemplate(template.id)).toBe(template)
+    for (const example of EXAMPLE_SHEETS) {
+      expect(example.name.length, example.id).toBeGreaterThan(0)
+      expect(example.summary.length, example.id).toBeGreaterThan(10)
+      expect(findExampleSheet(example.id)).toBe(example)
     }
   })
 
-  for (const template of TEMPLATES) {
-    it(`computes cleanly: ${template.id}`, () => {
-      expect(errorsIn(template.source)).toEqual([])
+  for (const example of EXAMPLE_SHEETS) {
+    it(`computes cleanly: ${example.id}`, () => {
+      expect(errorsIn(example.source)).toEqual([])
     })
   }
 
   it('gives every sheet a title, so the printed page is not headless', () => {
-    for (const template of TEMPLATES) {
-      expect(template.source.startsWith('# '), template.id).toBe(true)
+    for (const example of EXAMPLE_SHEETS) {
+      expect(example.source.startsWith('# '), example.id).toBe(true)
     }
   })
 
-  it('counts which starting point was taken, without needing the list widened later', () => {
-    expect(EVENTS).toContain('template used')
-    for (const template of TEMPLATES) {
-      expect(cleanProps({ seen: template.id }), template.id).toEqual({ seen: template.id })
+  /**
+   * An example is something you read; an empty sheet is not. If one of these
+   * ever became a skeleton with nothing worked out in it, it would be taking
+   * up a row in the sidebar for nothing.
+   */
+  it('is an example in every case, not a blank page', () => {
+    for (const example of EXAMPLE_SHEETS) {
+      const lines = linesOf(example.source)
+      expect(lines.some((line) => line.kind === 'calc' || line.kind === 'table'), example.id)
+        .toBe(true)
     }
   })
 })
 
-describe('the starter sheet', () => {
-  it('is what a browser that has never opened Longhand is given', () => {
+describe('the first visit', () => {
+  it('opens a project of examples, with the shortest one showing', () => {
     const store = freshStore()
+    expect(store.projects).toHaveLength(1)
+    expect(store.projects[0].name).toBe(EXAMPLE_PROJECT)
+    expect(store.projects[0].sheets.map((sheet) => sheet.name)).toEqual(
+      EXAMPLE_SHEETS.map((example) => example.name),
+    )
+    expect(store.activeSheetId).toBe(store.projects[0].sheets[0].id)
     expect(store.projects[0].sheets[0].name).toBe(STARTER.name)
-    expect(store.projects[0].sheets[0].source).toBe(STARTER.source)
   })
 
-  it('is a real calculation, not a welcome message', () => {
-    const lines = linesOf(STARTER.source)
-    expect(lines.some((line) => line.kind === 'calc')).toBe(true)
-    expect(lines.some((line) => line.kind === 'check')).toBe(true)
+  it('gives every example sheet a distinct name, or an import would find the wrong one', () => {
+    const names = freshStore().projects[0].sheets.map((sheet) => sheet.name)
+    expect(new Set(names).size).toBe(names.length)
   })
 
-  it('passes its own check, so the first thing anyone sees is a sheet that works', () => {
+  it('leaves a new sheet blank — the examples are not a wizard', () => {
+    expect(BLANK_SHEET.trim()).toBe('# New calculation')
+    expect(linesOf(BLANK_SHEET).some((line) => line.kind === 'calc')).toBe(false)
+  })
+
+  it('opens on a sheet that passes its own check', () => {
     const checks = linesOf(STARTER.source).filter((line) => line.kind === 'check')
     expect(checks.length).toBeGreaterThan(0)
     expect(checks.every((line) => line.kind === 'check' && line.pass)).toBe(true)

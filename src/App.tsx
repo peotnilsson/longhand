@@ -42,7 +42,6 @@ import {
   type Store,
   type Theme,
 } from './store'
-import { TEMPLATES } from './templates'
 import { findExample } from './examples'
 import { CONSTANTS_NAME, CONSTANTS_SHEET } from './constants'
 import { inspect, downstream, toMarkdown, tableFromPaste } from './inspect'
@@ -576,7 +575,6 @@ export default function App() {
   const [compare, setCompare] = useState<string | null>(null)
   const [figureError, setFigureError] = useState<string | null>(null)
   const [traced, setTraced] = useState<string | null>(null)
-  const [choosingTemplate, setChoosingTemplate] = useState(false)
   const editorRef = useRef<EditorView | null>(null)
   const figureInput = useRef<HTMLInputElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
@@ -1420,31 +1418,9 @@ export default function App() {
                       </li>
                     ))}
                     <li>
-                      <button
-                        className={choosingTemplate ? 'sheet add on' : 'sheet add'}
-                        aria-expanded={choosingTemplate}
-                        onClick={() => setChoosingTemplate((open) => !open)}
-                      >
+                      <button className="sheet add" onClick={() => addSheet()}>
                         + Sheet
                       </button>
-                      {choosingTemplate && (
-                        <ul className="templates">
-                          {TEMPLATES.map((template) => (
-                            <li key={template.id}>
-                              <button
-                                onClick={() => {
-                                  setChoosingTemplate(false)
-                                  track('template used', { seen: template.id })
-                                  addSheet(template.name, template.source)
-                                }}
-                              >
-                                <strong>{template.name}</strong>
-                                <span>{template.summary}</span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
                     </li>
                   </ul>
                 )}

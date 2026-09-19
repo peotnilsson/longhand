@@ -7,10 +7,10 @@ import {
   shareLink,
   LONG_LINK,
 } from './share'
-import { TEMPLATES } from './templates'
+import { EXAMPLE_SHEETS } from './templates'
 import { EXAMPLES } from './examples'
 
-const TOUR = TEMPLATES.find((template) => template.id === 'tour')!.source
+const TOUR = EXAMPLE_SHEETS.find((example) => example.id === 'tour')!.source
 
 describe('share links', () => {
   it('round-trips a sheet', async () => {

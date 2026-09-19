@@ -1317,7 +1317,7 @@ for (const [theme, width, height, tag] of [
     (await page.$('.cm-tooltip-autocomplete')) === null)
 }
 
-// 39. templates, and the sheet a browser that has never been here is given
+// 39. the example project a first visit is given
 {
   const first = await openPage({ viewport: { width: 1400, height: 900 } })
   first.setDefaultTimeout(45_000)
@@ -1329,24 +1329,22 @@ for (const [theme, width, height, tag] of [
   const shown = await first.$eval('.sheet-page', (e) => e.textContent)
   check('a first visit opens the starter sheet, not a blank page',
     named === 'Start here' && /Longhand reads a sheet top to bottom/.test(shown), named)
+
+  const sheets = await first.$$eval('.sheet:not(.add)', (els) => els.map((e) => e.textContent))
+  check('and a project of examples behind it', sheets.length >= 5, JSON.stringify(sheets))
+
   const verdicts = await first.$$eval('.verdict', (els) => els.map((e) => e.textContent))
-  check('and the starter sheet passes its own check',
+  check('the sheet it opens on passes its own check',
     verdicts.length > 0 && verdicts.every((t) => !/NOT OK/.test(t)), JSON.stringify(verdicts))
 
+  // The examples are there to be read, not to be a wizard: adding a sheet is
+  // still one click and still gives you an empty page.
   await first.click('.sheet.add')
-  await first.waitForSelector('.templates')
-  const names = await first.$$eval('.templates strong', (els) => els.map((e) => e.textContent))
-  check('a new sheet offers somewhere to start from', names.length >= 5, JSON.stringify(names))
-
-  await first.click('.templates button:has-text("Parameter study")')
-  await first.waitForTimeout(500)
-  const made = await first.evaluate(() =>
-    JSON.parse(localStorage.getItem('longhand:store')))
-  const added = made.projects[0].sheets.at(-1)
-  check('and picking one makes the sheet', added.name === 'Parameter study' &&
-    added.source.includes('table'), added.name)
-  check('the template list closes once you have chosen',
-    (await first.$('.templates')) === null)
+  await first.waitForTimeout(400)
+  check('a new sheet is added without asking anything', (await first.$('.templates')) === null)
+  const added = await first.evaluate(() =>
+    JSON.parse(localStorage.getItem('longhand:store')).projects[0].sheets.at(-1))
+  check('and it is blank', added.source.trim() === '# New calculation', JSON.stringify(added.source))
   await first.close()
 }
 

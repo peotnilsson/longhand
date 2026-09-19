@@ -47,7 +47,6 @@ export const EVENTS = [
   'recalculated',
   'feedback opened',
   'verification run',
-  'template used',
   'palette used',
 ] as const
 
@@ -128,17 +127,6 @@ const PROP_KEYS = [
 ] as const
 
 const PROP_WORDS = [
-  // The template ids, so we can tell which starting point people take. They
-  // are a closed list written here by hand rather than imported, because the
-  // point of an allowlist is that nothing reaches it by accident; a test in
-  // templates.test.ts fails if a new template is added without one.
-  'starter',
-  'blank',
-  'skeleton',
-  'study',
-  'measurement',
-  'design',
-  'tour',
   'first',
   'week',
   'month',
