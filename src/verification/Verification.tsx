@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Mark } from '../Mark'
+import { SiteFooter, SiteHeader } from '../SiteHeader'
 import { buildStamp } from '../build'
 import { start, track } from '../analytics'
 import { CASES, FIELDS, runSuite, type Field } from '../verification'
@@ -35,21 +35,7 @@ export default function Verification() {
 
   return (
     <div className="landing verification">
-      <header className="top">
-        <div className="wrap top-inner">
-          <a className="wordmark" href="/">
-            <Mark size={19} />
-            Longhand
-          </a>
-          <nav>
-            <a href="/docs">Reference</a>
-            <a href="https://github.com/peotnilsson/longhand">Source</a>
-            <a className="cta small" href="/app">
-              Open the app
-            </a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader here="verification" />
 
       <section className="hero verification-hero">
         <div className="wrap">
@@ -197,20 +183,7 @@ export default function Verification() {
         </div>
       </section>
 
-      <footer className="foot">
-        <div className="wrap foot-inner">
-          <span className="wordmark quiet">
-            <Mark size={17} />
-            Longhand
-          </span>
-          <nav>
-            <a href="/app">Open the app</a>
-            <a href="/docs">Reference</a>
-            <a href="/privacy">Privacy</a>
-            <a href="https://github.com/peotnilsson/longhand">Source</a>
-          </nav>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

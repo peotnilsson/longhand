@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Mark } from '../Mark'
+import { SiteFooter, SiteHeader } from '../SiteHeader'
 import { buildStamp } from '../build'
 import { DISCLAIMER } from '../build'
 import { start } from '../analytics'
@@ -24,21 +24,7 @@ export default function Privacy() {
 
   return (
     <div className="landing privacy">
-      <header className="top">
-        <div className="wrap top-inner">
-          <a className="wordmark" href="/">
-            <Mark size={19} />
-            Longhand
-          </a>
-          <nav>
-            <a href="/docs">Reference</a>
-            <a href="/verification">Verification</a>
-            <a className="cta small" href="/app">
-              Open the app
-            </a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader here="privacy" />
 
       <section className="hero privacy-hero">
         <div className="wrap narrow">
@@ -160,20 +146,7 @@ export default function Privacy() {
         </div>
       </section>
 
-      <footer className="foot">
-        <div className="wrap foot-inner">
-          <span className="wordmark quiet">
-            <Mark size={17} />
-            Longhand
-          </span>
-          <nav>
-            <a href="/app">Open the app</a>
-            <a href="/docs">Reference</a>
-            <a href="/verification">Verification</a>
-            <a href="https://github.com/peotnilsson/longhand">Source</a>
-          </nav>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

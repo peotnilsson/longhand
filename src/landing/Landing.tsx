@@ -1,4 +1,4 @@
-import { Mark } from '../Mark'
+import { SiteFooter, SiteHeader } from '../SiteHeader'
 import { EXAMPLES } from '../examples'
 import './landing.css'
 
@@ -60,22 +60,7 @@ const POINTS: { title: string; text: string }[] = [
 export default function Landing() {
   return (
     <div className="landing">
-      <header className="top">
-        <div className="wrap top-inner">
-          <a className="wordmark" href="/">
-            <Mark size={19} />
-            Longhand
-          </a>
-          <nav>
-            <a href="/docs">Reference</a>
-            <a href="/verification">Verification</a>
-            <a href="https://github.com/peotnilsson/longhand">Source</a>
-            <a className="cta small" href="/app">
-              Open the app
-            </a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="hero">
         <div className="wrap">
@@ -174,13 +159,13 @@ export default function Landing() {
 
       <section className="examples">
         <div className="wrap">
-          <h2>Four worked calculations</h2>
+          <h2>Worked calculations</h2>
           <p className="sub">
             Real problems, not feature demonstrations. Each one opens in the app as a sheet you
             can edit.
           </p>
           <div className="cards">
-            {EXAMPLES.map((example) => (
+            {EXAMPLES.slice(0, 2).map((example) => (
               <a className="card" key={example.id} href={`/app?example=${example.id}`}>
                 <h3>{example.name}</h3>
                 <p className="blurb">{example.blurb}</p>
@@ -189,6 +174,11 @@ export default function Landing() {
               </a>
             ))}
           </div>
+          <p className="more">
+            <a href="/docs#examples">
+              {EXAMPLES.length - 2} more worked calculations, with the rest of the reference →
+            </a>
+          </p>
         </div>
       </section>
 
@@ -278,21 +268,7 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="foot">
-        <div className="wrap foot-inner">
-          <span className="wordmark quiet">
-            <Mark size={17} />
-            Longhand
-          </span>
-          <nav>
-            <a href="/app">Open the app</a>
-            <a href="/docs">Reference</a>
-            <a href="/verification">Verification</a>
-            <a href="/privacy">Privacy</a>
-            <a href="https://github.com/peotnilsson/longhand">Source</a>
-          </nav>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

@@ -580,7 +580,7 @@ await seedWith(seed)
     JSON.stringify(images))
 
   const links = await landing.$$eval('a[href]', (els) => els.map((a) => a.getAttribute('href')))
-  check('it links to the app, the reference and an example',
+  check('it links to the app, the help page and an example',
     links.includes('/app') && links.includes('/docs') &&
       links.some((href) => href.startsWith('/app?example=')),
     JSON.stringify([...new Set(links)].slice(0, 8)))
@@ -612,8 +612,12 @@ await seedWith(seed)
   const comparison = await landing.$$eval('.compare tbody tr th', (els) => els.map((e) => e.textContent))
   check('the comparison names the alternatives', comparison.length >= 4, JSON.stringify(comparison))
 
+  // Two on the landing page, the rest one click away: a row of four cards was
+  // more of the page spent on examples than the examples were worth.
   const cards = await landing.$$('.card')
-  check('all four worked examples are offered', cards.length === 4, `${cards.length} cards`)
+  check('two worked examples are shown', cards.length === 2, `${cards.length} cards`)
+  check('and the rest are one click away',
+    (await landing.$('a[href="/docs#examples"]')) !== null)
 
   const sample = await landing.$('a[href="/sample-package.pdf"]')
   check('the sample PDF is offered', !!sample)
@@ -668,7 +672,7 @@ await seedWith(seed)
   await landing.close()
 }
 
-// 20. the reference
+// 20. the help page
 {
   const docs = await browser.newPage({ viewport: { width: 1400, height: 900 } })
   const problems = []
@@ -676,11 +680,19 @@ await seedWith(seed)
   await docs.goto('http://localhost:4173/docs')
   await docs.waitForSelector('.docs-main')
 
-  check('docs: the mark is in the header',
-    (await docs.$eval('.brand svg', (e) => e.getAttribute('aria-label'))) === 'Longhand')
+  // The header is the shared one, so it has to be the same lockup as the
+  // landing page's — same mark size, same wordmark, same filled button.
+  check('help: the header is the shared one',
+    (await docs.$eval('.top .wordmark svg', (e) => e.getAttribute('aria-label'))) === 'Longhand')
+  check('help: with the same call to action',
+    (await docs.$eval('.top nav a.cta', (e) => e.getAttribute('href'))) === '/app')
+  check('help: the page is called Help',
+    (await docs.$eval('.intro h1', (e) => e.textContent)) === 'Help')
+  check('help: and says where to ask',
+    (await docs.$$('#ask .ask-list li')).length >= 3)
 
   const entries = await docs.$$('.entry')
-  check('the reference lists every command', entries.length >= 25, `${entries.length} entries`)
+  check('help lists every command', entries.length >= 25, `${entries.length} entries`)
 
   const sections = await docs.$$eval('.section h2', (els) => els.map((e) => e.textContent))
   check('and groups them', sections.length >= 6, JSON.stringify(sections))
@@ -717,7 +729,7 @@ await seedWith(seed)
   check('every entry can be linked to', anchors.includes('solve') && anchors.includes('interp'),
     `${anchors.length} anchors`)
   const examples = await docs.$$eval('a[href^="/app?example="]', (els) => els.length)
-  check('the reference offers the worked examples', examples >= 4, `${examples} links`)
+  check('help offers the worked examples', examples >= 4, `${examples} links`)
 
   // the frame is pinned: only the text column scrolls
   {
@@ -726,14 +738,14 @@ await seedWith(seed)
     check('docs: the page itself does not scroll', !pageScrolls)
 
     const top = (selector) => docs.$eval(selector, (e) => Math.round(e.getBoundingClientRect().top))
-    const before = [await top('.docs-head'), await top('.docs-nav'), await top('.search')]
+    const before = [await top('.top'), await top('.docs-nav'), await top('.search')]
     const scrolled = await docs.evaluate(() => {
       const main = document.querySelector('.docs-main')
       main.scrollTop = 1400
       return main.scrollTop
     })
     await docs.waitForTimeout(350)
-    const after = [await top('.docs-head'), await top('.docs-nav'), await top('.search')]
+    const after = [await top('.top'), await top('.docs-nav'), await top('.search')]
     check('docs: the text column scrolls', scrolled > 1000, `scrollTop ${scrolled}`)
     check('docs: header, index and search stay put', JSON.stringify(before) === JSON.stringify(after),
       `${JSON.stringify(before)} -> ${JSON.stringify(after)}`)
@@ -755,7 +767,7 @@ await seedWith(seed)
       marked[0] === 'Where your work is kept', JSON.stringify(marked))
 
     const lines = await docs.evaluate(() => ({
-      header: getComputedStyle(document.querySelector('.docs-head')).borderBottomWidth,
+      header: getComputedStyle(document.querySelector('.top')).borderBottomWidth,
       divider: getComputedStyle(document.querySelector('.docs-nav')).borderRightWidth,
     }))
     check('docs: two hairlines mark the frame',
@@ -778,7 +790,7 @@ await seedWith(seed)
   check('docs on a phone: no horizontal overflow', phone.overflow === 0, `${phone.overflow}px`)
   check('docs on a phone: one ordinary scrolling document',
     phone.pageScrolls && !phone.mainScrolls, JSON.stringify(phone))
-  check('the reference threw nothing', problems.length === 0, problems.join(' | '))
+  check('help threw nothing', problems.length === 0, problems.join(' | '))
   await docs.screenshot({ path: 'verify-docs.png' })
   await docs.close()
 }
@@ -1019,6 +1031,12 @@ for (const [theme, width, height, tag] of [
     check(`${where} links to the privacy note`, links.includes('/privacy'))
     check(`${where} links to the verification suite`,
       page_ === '/verification' || links.includes('/verification'))
+
+    // Verification and Privacy belong in the footer and in the sections that
+    // earn them, not in the bar at the top of every page.
+    const top = await other.$$eval('.top nav a', (as) => as.map((a) => a.getAttribute('href')))
+    check(`${where}: the top bar stays short`,
+      !top.includes('/verification') && !top.includes('/privacy'), JSON.stringify(top))
     await other.close()
   }
   await privacy.close()

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ENTRIES, REFERENCE, filterSections, type Entry, type Section } from '../reference'
 import { EXAMPLES } from '../examples'
-import { Mark } from '../Mark'
+import { SiteHeader } from '../SiteHeader'
+import '../landing/landing.css'
 import './docs.css'
 
 /**
- * The reference: every command, what it means, and a worked line to copy.
+ * Help: every command, what it means, and a worked line to copy.
  *
  * It reads the same module the app's Help button points at, so there is one
  * place where the language is described and no way for the page to drift away
@@ -137,20 +138,7 @@ export default function Docs() {
 
   return (
     <div className="docs">
-      <header className="docs-head">
-        <div className="docs-head-inner">
-          <a className="brand" href="/">
-            <Mark size={18} />
-            Longhand
-          </a>
-          <nav>
-            <a href="/app">Open the app</a>
-            <a href="/verification">Verification</a>
-            <a href="/privacy">Privacy</a>
-            <a href="https://github.com/peotnilsson/longhand">Source</a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader here="help" />
 
       <div className="docs-body">
         <aside className="docs-nav">
@@ -162,7 +150,7 @@ export default function Docs() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search — press /"
-              aria-label="Search the reference"
+              aria-label="Search the help"
             />
             {query ? (
               <p className="count">
@@ -170,7 +158,11 @@ export default function Docs() {
               </p>
             ) : (
               <ul>
-                {[...REFERENCE, { id: 'examples', title: 'Worked examples' }].map((section) => (
+                {[
+                  ...REFERENCE,
+                  { id: 'examples', title: 'Worked examples' },
+                  { id: 'ask', title: 'Still stuck?' },
+                ].map((section) => (
                   <li key={section.id}>
                     <a
                       className={current === section.id ? 'current' : undefined}
@@ -189,7 +181,7 @@ export default function Docs() {
         <main className="docs-main" ref={main}>
           {!query && (
             <div className="intro">
-              <h1>Reference</h1>
+              <h1>Help</h1>
               <p>
                 Longhand is a calculation sheet you write in plain text. Every line is an
                 assignment, a check, a table, a heading or a note; units come along for the
@@ -198,7 +190,8 @@ export default function Docs() {
               </p>
               <p className="intro-hint">
                 Press <kbd>/</kbd> to search. Every example below is run against the engine
-                whenever the tests do, so nothing here can quietly stop being true.
+                whenever the tests do, so nothing here can quietly stop being true. If what you
+                need is not here, <a href="#ask">say so</a> — that is how it gets added.
               </p>
             </div>
           )}
@@ -218,8 +211,10 @@ export default function Docs() {
             <section className="section" id="examples">
               <h2>Worked examples</h2>
               <p className="blurb">
-                Four calculations that solve a real problem rather than demonstrate a feature.
-                Each opens in the app as a new sheet.
+                Calculations that solve a real problem rather than demonstrate a feature. Each
+                one opens in the app as a sheet you can edit. For problems whose answers are
+                known in advance — closed forms and exact conversions, run live in your
+                browser — see the <a href="/verification">verification suite</a>.
               </p>
               {EXAMPLES.map((example) => (
                 <article className="entry" key={example.id}>
@@ -235,6 +230,39 @@ export default function Docs() {
                   </p>
                 </article>
               ))}
+            </section>
+          )}
+
+          {!query && (
+            <section className="section ask" id="ask">
+              <h2>Still stuck?</h2>
+              <p className="blurb">
+                There is no support desk — one person builds this — but everything here reaches
+                him, and a question that turns out to be a missing feature usually becomes one.
+              </p>
+              <ul className="ask-list">
+                <li>
+                  <strong>Something is missing, or does not work.</strong>{' '}
+                  <a href="https://github.com/peotnilsson/longhand/issues/new">Open an issue</a>,
+                  or use the <em>What is missing?</em> box in the app — under your name, at the
+                  foot of the sidebar. Neither one attaches your calculation.
+                </li>
+                <li>
+                  <strong>A number looks wrong.</strong> That is the most useful thing anyone can
+                  send. Have a look at the <a href="/verification">verification suite</a> first,
+                  then say which line it was and what you expected instead.
+                </li>
+                <li>
+                  <strong>You would rather just write to someone.</strong>{' '}
+                  <a href="mailto:peotnilsson@gmail.com">peotnilsson@gmail.com</a>.
+                </li>
+                <li>
+                  <strong>You want to know what it does with your work.</strong> It is all{' '}
+                  <a href="https://github.com/peotnilsson/longhand">open source</a>, and{' '}
+                  <a href="/privacy">the privacy note</a> says in ordinary words what does and
+                  does not leave your browser.
+                </li>
+              </ul>
             </section>
           )}
 

@@ -25,47 +25,21 @@ body {
 
 /* ------------------------------------------------------------------ header */
 
-.docs-head {
-  background: var(--paper);
-  border-bottom: 1px solid var(--rule);
-}
-
-.docs-head-inner,
+/**
+ * The header is the shared one from SiteHeader, styled by landing.css, so this
+ * page's bar is the same height, the same mark size and the same button as the
+ * landing page's. It used to be written out here separately and had drifted —
+ * a smaller mark, a shorter bar, a plain link where the others had a button —
+ * which made the reference look like a different site.
+ *
+ * The one thing that has to match by hand is the measure: `.wrap` is 1100px
+ * wide, so the body below it is too, or the wordmark sits off the edge of the
+ * column it is supposed to head.
+ */
 .docs-body {
-  max-width: 1080px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 0 24px;
-}
-
-.docs-head-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  height: 52px;
-}
-
-.brand {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.docs-head nav {
-  display: flex;
-  gap: 16px;
-  font-size: 13px;
-}
-
-.docs-head nav a {
-  color: var(--muted);
-  text-decoration: none;
-}
-
-.docs-head nav a:hover {
-  color: var(--ink);
-  text-decoration: underline;
 }
 
 /* -------------------------------------------------------------- the layout */
@@ -328,6 +302,40 @@ kbd {
   color: var(--muted);
 }
 
+/* ---------------------------------------------------------------- still stuck */
+
+/**
+ * Four routes, sorted by what the reader is actually holding — a missing
+ * feature, a number they doubt, a sentence they want to write, a question
+ * about their own privacy. A support page that only says "open an issue"
+ * answers one of those.
+ */
+.ask-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.ask-list li:last-child {
+  border-bottom: 0;
+}
+
+.ask-list strong {
+  color: var(--ink);
+}
+
+.ask-list a {
+  color: var(--ink);
+}
+
 .docs-foot {
   margin-top: 64px;
   padding-top: 18px;
@@ -350,13 +358,6 @@ kbd {
     overflow: visible;
   }
 
-  .docs-head {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-  }
-
-  .docs-head-inner,
   .docs-body {
     padding: 0 16px;
   }
