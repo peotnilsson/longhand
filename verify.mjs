@@ -18,7 +18,7 @@ page.on('pageerror', (e) => bad.push('PAGE ERROR: ' + e.message))
 page.on('console', (m) => { if (m.type() === 'error') bad.push('CONSOLE: ' + m.text()) })
 
 const seed = {
-  version: 3,
+  version: 4,
   projects: [
     { id: 'p1', name: 'Bridge', meta: { client: 'C', author: 'Peo', checkedBy: 'AN', revision: 'B' },
       sheets: [
@@ -152,9 +152,14 @@ await page.waitForTimeout(400)
   const pages = await page.$$('.sheet-page')
   const positions = await page.$$eval('.sheet-page', (els) =>
     els.map((e) => (e.textContent.match(/Sheet\s*\d+ of \d+/) || [''])[0].replace(/\s+/g, ' ')))
-  check('package prints every sheet, numbered', pages.length === 3 &&
-    positions.join('|') === 'Sheet1 of 3|Sheet2 of 3|Sheet3 of 3',
+  // Four pages, not three: the package opens with a page listing every check
+  // in it, which is the page a reviewer reads first.
+  check('package prints every sheet, numbered', pages.length === 4 &&
+    positions.slice(1).join('|') === 'Sheet1 of 3|Sheet2 of 3|Sheet3 of 3',
     `${pages.length} pages, ${JSON.stringify(positions)}`)
+  check('package opens with all its checks on one page',
+    (await page.$('.package-checks')) !== null &&
+    /All checks in this package/.test(await page.$eval('.package-checks', (e) => e.textContent)))
   await page.click('.package-bar button:has-text("Close")')
   await page.waitForTimeout(200)
   check('package closes', !(await page.$('.package-bar')))
@@ -561,6 +566,30 @@ await seedWith(seed)
       links.some((href) => href.startsWith('/app?example=')),
     JSON.stringify([...new Set(links)].slice(0, 8)))
 
+  // the mark, in the header and as the icon the browser asks for
+  {
+    const lockup = await landing.$eval('.top .wordmark svg', (e) => ({
+      label: e.getAttribute('aria-label'),
+      stroke: getComputedStyle(e).stroke,
+      width: Math.round(e.getBoundingClientRect().width),
+    }))
+    check('landing: the mark sits beside the wordmark',
+      lockup.label === 'Longhand' && lockup.width >= 14, JSON.stringify(lockup))
+
+    for (const [path, type] of [['/favicon.svg', 'image/svg+xml'], ['/apple-touch-icon.png', 'image/png']]) {
+      const response = await landing.request.get(`http://localhost:4173${path}`)
+      check(`landing: ${path} is served`,
+        response.status() === 200 && (response.headers()['content-type'] ?? '').includes(type.split('/')[1]),
+        `${response.status()} ${response.headers()['content-type']}`)
+    }
+
+    const declared = await landing.$$eval('link[rel]', (els) =>
+      els.map((e) => `${e.getAttribute('rel')}:${e.getAttribute('href')}`))
+    check('landing: both icons are declared',
+      declared.includes('icon:/favicon.svg') && declared.includes('apple-touch-icon:/apple-touch-icon.png'),
+      JSON.stringify(declared))
+  }
+
   const comparison = await landing.$$eval('.compare tbody tr th', (els) => els.map((e) => e.textContent))
   check('the comparison names the alternatives', comparison.length >= 4, JSON.stringify(comparison))
 
@@ -627,6 +656,9 @@ await seedWith(seed)
   docs.on('pageerror', (error) => problems.push(String(error)))
   await docs.goto('http://localhost:4173/docs')
   await docs.waitForSelector('.docs-main')
+
+  check('docs: the mark is in the header',
+    (await docs.$eval('.brand svg', (e) => e.getAttribute('aria-label'))) === 'Longhand')
 
   const entries = await docs.$$('.entry')
   check('the reference lists every command', entries.length >= 25, `${entries.length} entries`)
@@ -767,6 +799,9 @@ await seedWith(seed)
   const app = await browser.newPage({ viewport: { width: 1400, height: 900 } })
   await app.goto('http://localhost:4173/app')
   await app.waitForSelector('.sheet-page')
+  check('app: the mark is in the sidebar',
+    (await app.$eval('.brand svg', (e) => e.getAttribute('aria-label'))) === 'Longhand')
+
   const help = await app.$('.toolbar-link')
   check('Help is a link to the reference',
     (await help?.getAttribute('href')) === '/docs' && (await help?.textContent()) === 'Help')
@@ -793,6 +828,196 @@ for (const [theme, width, height, tag] of [
   check(`${tag}: nothing clipped`, clipped.length === 0, JSON.stringify(clipped))
   await view.screenshot({ path: `verify-${tag}.png` })
   await view.close()
+}
+
+// 24. the checks summary sits above the working and jumps to the line
+{
+  await seedWith(seed)
+  const summary = await page.$('.checks-summary')
+  check('checks: a summary is on the sheet', summary !== null)
+
+  const rows = await page.$$eval('.checks-summary li', (items) =>
+    items.map((item) => ({
+      label: item.querySelector('.what')?.textContent?.trim(),
+      badge: item.querySelector('.badge')?.textContent?.trim(),
+      margin: item.querySelector('.margin')?.textContent?.trim(),
+    })))
+  check('checks: it lists the line the engineer wrote',
+    rows.some((row) => row.label?.startsWith('sigma <= f_ck')), JSON.stringify(rows))
+  check('checks: with a verdict and a margin',
+    rows[0]?.badge === 'OK' && /% spare/.test(rows[0]?.margin ?? ''), JSON.stringify(rows[0]))
+
+  const above = await page.evaluate(() => {
+    const box = document.querySelector('.checks-summary')?.getBoundingClientRect().top ?? 0
+    const first = document.querySelector('.calc-block')?.getBoundingClientRect().top ?? 0
+    return first - box
+  })
+  check('checks: it comes before the working', above > 0, `${Math.round(above)}px`)
+
+  await page.click('.checks-summary .what a')
+  await page.waitForTimeout(700)
+  check('checks: clicking a row flashes the check it came from',
+    (await page.$$('.check')).length > 0)
+
+  const verdict = await page.$('.sheet-verdict')
+  check('checks: the editor shows the verdict too',
+    (await verdict?.textContent()) === 'All OK')
+}
+
+// 25. a failing check is visible as a failure, not just quieter
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Fail', source: '# Fail\na = 40 MPa\nf = 30 MPa\na <= f\n' },
+  ] }], activeSheetId: 's1' })
+  const failing = await page.$('.checks-summary.has-failure')
+  check('checks: a failing sheet says so at the top', failing !== null)
+  check('checks: and in the editor',
+    (await page.$eval('.sheet-verdict', (e) => e.textContent)) === '1 NOT OK')
+}
+
+// 26. share: the sheet goes into the hash and comes back read-only
+{
+  await seedWith(seed)
+  await page.click('button:has-text("Share")')
+  await page.click('button:has-text("Copy a link")')
+  await page.waitForSelector('.link-box')
+  const url = await page.$eval('.link-box', (e) => e.value)
+  check('share: the link points at the app', url.includes('/app#s='), url.slice(0, 60))
+  check('share: nothing is in the query string', !url.includes('?'), url.slice(0, 80))
+  check('share: it is short enough to send', url.length < 4000, `${url.length} characters`)
+
+  const reader = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const requests = []
+  reader.on('request', (request) => requests.push(request.url()))
+  await reader.goto(url)
+  await reader.waitForSelector('.shared-bar')
+  const shown = (await reader.$eval('.output-pane', (e) => e.textContent)).replace(/\s+/g, ' ')
+  check('share: the reader gets the calculation', /MPa/.test(shown) && /OK/.test(shown))
+  check('share: read-only, with a way to take a copy',
+    (await reader.$('button:has-text("Make a copy")')) !== null)
+
+  // The whole point of using the hash: the sheet must not reach any server.
+  const leaked = requests.filter((request) => request.includes('s=') && request.includes('#'))
+  check('share: the sheet never leaves the browser', leaked.length === 0, JSON.stringify(leaked))
+
+  await reader.click('button:has-text("Make a copy")')
+  await reader.waitForSelector('.toolbar')
+  check('share: making a copy clears the link from the address',
+    !(await reader.evaluate(() => window.location.hash)))
+  await reader.close()
+}
+
+// 27. history: a saved revision diffs against the sheet as it stands
+{
+  await seedWith(seed)
+  await page.click('button:has-text("History")')
+  await page.click('button:has-text("Save a revision now")')
+  await page.waitForSelector('.revisions li')
+
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('\nnew_line = 1 mm\n')
+  await page.waitForTimeout(400)
+
+  await page.click('.revision-head')
+  await page.waitForSelector('.diff')
+  const added = await page.$$eval('.diff .row.added', (rows) => rows.map((r) => r.textContent))
+  check('history: the diff shows what was added',
+    added.some((row) => row.includes('new_line')), JSON.stringify(added))
+
+  await page.click('button:has-text("Put this version back")')
+  await page.waitForTimeout(400)
+  const source = await page.$eval('.cm-content', (e) => e.textContent)
+  check('history: restoring puts the old version back', !source.includes('new_line'))
+  const kept = await page.$$eval('.revisions li', (items) => items.length)
+  check('history: and keeps the newer one as its own revision', kept >= 2, `${kept} revisions`)
+}
+
+// 28. recalculating from scratch agrees with the cached run
+{
+  await seedWith(seed)
+  await page.click('button:has-text("Settings")')
+  await page.click('button:has-text("Recalculate from scratch")')
+  await page.waitForTimeout(400)
+  const said = await page.$eval('.panel', (e) => e.textContent)
+  check('trust: a cold run matches the cached one', /identical to the cached run/.test(said),
+    said.slice(0, 160))
+  check('trust: the build is named in Settings', /Longhand build/.test(said))
+}
+
+// 29. the printed sheet says what produced it and what it does not claim
+{
+  await seedWith(seed)
+  const foot = await page.$eval('.sheet-foot', (e) => e.textContent)
+  check('print: the footer carries the disclaimer', /calculation aid/.test(foot))
+  check('print: and the build stamp', /Longhand build/.test(foot))
+  const hidden = await page.$eval('.sheet-foot', (e) => getComputedStyle(e).display)
+  check('print: it stays off the screen', hidden === 'none', hidden)
+}
+
+// 30. the verification page runs the suite in the browser
+{
+  const verification = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  verification.on('pageerror', (e) => bad.push('VERIFICATION PAGE ERROR: ' + e.message))
+  await verification.goto('http://localhost:4173/verification')
+  await verification.waitForSelector('.scoreboard')
+  const score = await verification.$eval('.scoreboard', (e) => e.textContent)
+  check('verification: every case passes in the browser',
+    /^(\d+) of \1 cases pass/.test(score.trim()) && !score.includes('0 of'), score.slice(0, 80))
+  check('verification: the scoreboard is not a failure', 
+    (await verification.$('.scoreboard.fail')) === null)
+  const failures = await verification.$$('.case-list li.not-ok')
+  check('verification: no case is marked FAIL', failures.length === 0, `${failures.length} failing`)
+
+  await verification.click('.case-head')
+  await verification.waitForSelector('.case-sheet pre')
+  check('verification: a case shows its sheet',
+    (await verification.$eval('.case-sheet pre', (e) => e.textContent)).length > 40)
+  check('verification: and the checks it ran',
+    (await verification.$$('.case-results li')).length > 0)
+  await verification.screenshot({ path: 'verify-verification.png' })
+  await verification.close()
+}
+
+// 31. the privacy page exists and is linked from everywhere it should be
+{
+  const privacy = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  privacy.on('pageerror', (e) => bad.push('PRIVACY PAGE ERROR: ' + e.message))
+  await privacy.goto('http://localhost:4173/privacy')
+  await privacy.waitForSelector('.privacy')
+  const words = (await privacy.$eval('.honest', (e) => e.textContent)).replace(/\s+/g, ' ')
+  check('privacy: it says where calculations live', /browser's own storage/.test(words))
+  check('privacy: it is honest about share links',
+    /anyone who has it can read the calculation/.test(words))
+  check('privacy: it names the licence', /MIT licence/.test(words))
+  check('privacy: it states what Longhand is not', /calculation aid/.test(words))
+
+  for (const [page_, where] of [['/', 'landing'], ['/docs', 'reference'], ['/verification', 'verification']]) {
+    const other = await browser.newPage()
+    await other.goto('http://localhost:4173' + page_)
+    await other.waitForTimeout(200)
+    const links = await other.$$eval('a', (as) => as.map((a) => a.getAttribute('href')))
+    check(`${where} links to the privacy note`, links.includes('/privacy'))
+    check(`${where} links to the verification suite`,
+      page_ === '/verification' || links.includes('/verification'))
+    await other.close()
+  }
+  await privacy.close()
+}
+
+// 32. nothing reaches a third party without being asked
+{
+  const clean = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+  const external = []
+  clean.on('request', (request) => {
+    const url = request.url()
+    if (!url.startsWith('http://localhost:4173') && !url.startsWith('data:')) external.push(url)
+  })
+  await clean.goto('http://localhost:4173/app')
+  await clean.waitForSelector('.sheet-page')
+  await clean.waitForTimeout(800)
+  check('the app makes no third-party request', external.length === 0, JSON.stringify(external))
+  await clean.close()
 }
 
 await browser.close()

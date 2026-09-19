@@ -133,8 +133,13 @@ body {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
 }
 
 .tree {
@@ -969,6 +974,379 @@ body {
   color: var(--error);
 }
 
+
+/* ------------------------------------------------- checks summary */
+
+/**
+ * The verdicts, before the working.
+ *
+ * Deliberately plain: a box, a rule under the header, one row per check. It is
+ * the first thing on the page and the last thing that should be decorated —
+ * what carries here is the word OK and the number beside it.
+ */
+.checks-summary {
+  margin: 0 0 26px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--shade);
+}
+
+.checks-summary.has-failure {
+  border-color: var(--error);
+}
+
+.checks-summary header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.checks-summary h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.checks-summary .overall {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.checks-summary .overall.pass {
+  color: var(--pass);
+}
+
+.checks-summary .overall.fail {
+  color: var(--error);
+}
+
+.checks-summary ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checks-summary li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 150px);
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13px;
+}
+
+.checks-summary li:last-child {
+  border-bottom: 0;
+}
+
+.checks-summary .what {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.checks-summary .what a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.checks-summary .what a:hover {
+  border-bottom-color: currentColor;
+}
+
+/* Which heading the check sits under — quiet, because it is orientation. */
+.checks-summary .where {
+  display: block;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.checks-summary .badge {
+  justify-self: start;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.checks-summary li.pass .badge {
+  color: var(--pass);
+  background: var(--pass-bg);
+}
+
+.checks-summary li.fail .badge {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.checks-summary .margin {
+  text-align: right;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.checks-summary .tightest {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.package-checks .package-sheet {
+  margin-top: 14px;
+}
+
+.package-checks h4 {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+}
+
+/* Where a jumped-to check lands, so the eye finds it without hunting. */
+.check.flash {
+  outline: 2px solid var(--rule-strong);
+  outline-offset: 3px;
+}
+
+.sheet-verdict {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.sheet-verdict.pass {
+  color: var(--pass);
+  background: var(--pass-bg);
+}
+
+.sheet-verdict.fail {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+/* ------------------------------------------------- figures */
+
+.sheet-figure {
+  margin: 20px 0;
+  padding: 0;
+}
+
+.sheet-figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 440px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.sheet-figure figcaption {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.figure-missing {
+  padding: 14px 16px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------- printed footer */
+
+/**
+ * Screen already says which build it is in Settings, and the disclaimer would
+ * be noise under every sheet. On paper both are required: a filed calculation
+ * has to say what produced it and what it does not claim.
+ */
+.sheet-foot {
+  display: none;
+}
+
+/* ------------------------------------------------- share, history, feedback */
+
+.link-box,
+.panel textarea {
+  width: 100%;
+  padding: 9px 10px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.panel textarea {
+  font-family: inherit;
+  font-size: 13.5px;
+}
+
+.link-box {
+  word-break: break-all;
+}
+
+.check-line {
+  display: flex !important;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+}
+
+.check-line input {
+  width: auto;
+}
+
+.revisions {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.revisions li {
+  border-bottom: 1px solid var(--rule);
+}
+
+.revision-head {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 4px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.revision-head:hover {
+  background: var(--hover);
+}
+
+.revisions li.open .revision-head {
+  font-weight: 600;
+}
+
+.revision-head .when {
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--muted);
+}
+
+.revision-head .delta {
+  color: var(--faint);
+}
+
+.revision-body {
+  padding: 4px 4px 12px;
+}
+
+/* A diff reads as a diff: fixed pitch, one line per line, signs in a gutter. */
+.diff {
+  max-height: 260px;
+  margin: 0 0 10px;
+  padding: 8px 0;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--shade);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.diff .row {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff .sign {
+  flex: none;
+  width: 1ch;
+  color: var(--faint);
+}
+
+.diff .row.added {
+  color: var(--pass);
+  background: var(--pass-bg);
+}
+
+.diff .row.removed {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.diff .row.same {
+  color: var(--muted);
+}
+
+.settings-buttons button.primary {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* ------------------------------------------------- a shared sheet */
+
+.app.shared {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.shared-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--shade);
+  border-bottom: 1px solid var(--rule);
+}
+
+.shared-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shared-actions button {
+  padding: 6px 13px;
+  font-size: 13px;
+  color: var(--paper);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sheet-name.static {
+  padding: 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------- print */
 
 @page {
@@ -1051,6 +1429,44 @@ body {
   .table-scroll,
   .calc .katex-display {
     overflow: visible;
+  }
+
+  /* The summary is part of the deliverable, so it prints — without the screen
+     shading, which a laser printer turns into a grey slab. */
+  .checks-summary {
+    break-inside: avoid;
+    background: none;
+    border-color: #cfccc6;
+  }
+
+  .checks-summary .what a {
+    border-bottom: 0;
+  }
+
+  .sheet-figure {
+    break-inside: avoid;
+  }
+
+  .sheet-figure img {
+    max-height: 110mm;
+  }
+
+  .sheet-foot {
+    display: block;
+    margin: 22px 0 0;
+    padding-top: 7px;
+    border-top: 1px solid #cfccc6;
+    font-size: 7.5pt;
+    line-height: 1.5;
+    color: #6b6b66;
+    break-inside: avoid;
+  }
+
+  /* One disclaimer per printed package, not one per sheet: Paged.js puts the
+     build stamp in the page footer, so the long sentence only needs saying at
+     the end of each sheet's own flow. */
+  .sheet-verdict {
+    display: none;
   }
 }
 

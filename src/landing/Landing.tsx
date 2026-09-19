@@ -1,3 +1,4 @@
+import { Mark } from '../Mark'
 import { EXAMPLES } from '../examples'
 import './landing.css'
 
@@ -61,9 +62,13 @@ export default function Landing() {
     <div className="landing">
       <header className="top">
         <div className="wrap top-inner">
-          <span className="wordmark">Longhand</span>
+          <a className="wordmark" href="/">
+            <Mark size={19} />
+            Longhand
+          </a>
           <nav>
             <a href="/docs">Reference</a>
+            <a href="/verification">Verification</a>
             <a href="https://github.com/peotnilsson/longhand">Source</a>
             <a className="cta small" href="/app">
               Open the app
@@ -187,6 +192,37 @@ export default function Landing() {
         </div>
       </section>
 
+      <section className="verified">
+        <div className="wrap split">
+          <div>
+            <h2>How you know it is right</h2>
+            <p>
+              A calculation tool is worth exactly what its arithmetic is worth, so Longhand
+              carries a suite of problems whose answers are known before it is asked — closed-form
+              results, and conversions that are exact by definition. Each one is an ordinary sheet
+              that ends in a check, with the expected value written into it next to a note saying
+              where that value came from.
+            </p>
+            <p>
+              The suite runs on every commit, and it runs again in your own browser when you open
+              the page, on the same build that served it. Nothing there cites a page in a book: a
+              closed form and an SI definition are things you can confirm for yourself.
+            </p>
+            <p>
+              <a className="cta ghost" href="/verification">
+                Run the verification suite
+              </a>
+            </p>
+          </div>
+          <div className="verified-note">
+            <p>
+              It proves Longhand gets these problems right. It does not prove your calculation is
+              the right calculation — that judgement stays with you, as it would on paper.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section className="print">
         <div className="wrap split">
           <div>
@@ -224,10 +260,14 @@ export default function Landing() {
           </p>
           <p>
             There are no accounts and no server, which is why nothing you type leaves the
-            browser — and also why sharing a sheet today means sending a file. Sheets live in
-            your browser's storage; Chrome and Edge can additionally keep a copy in a file you
-            choose, and every browser can export a backup. There is no library of standard code
-            checks, no collaboration, and no mobile editing worth the name.
+            browser. Sharing works by putting the whole sheet inside a link's fragment, which
+            never reaches a server — so a link opens without an account, and is also as private
+            as whatever you send it through. Sheets live in your browser's storage; Chrome and
+            Edge can additionally keep a copy in a file you choose, and every browser can export
+            a backup. There is no library of standard code checks, no collaboration, and no
+            mobile editing worth the name. The{' '}
+            <a href="/privacy">privacy note</a> says exactly what does and does not leave your
+            machine.
           </p>
           <p>
             It is built by one engineering-mathematics student at KTH who uses it for his own
@@ -240,10 +280,15 @@ export default function Landing() {
 
       <footer className="foot">
         <div className="wrap foot-inner">
-          <span>Longhand</span>
+          <span className="wordmark quiet">
+            <Mark size={17} />
+            Longhand
+          </span>
           <nav>
             <a href="/app">Open the app</a>
             <a href="/docs">Reference</a>
+            <a href="/verification">Verification</a>
+            <a href="/privacy">Privacy</a>
             <a href="https://github.com/peotnilsson/longhand">Source</a>
           </nav>
         </div>

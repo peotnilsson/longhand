@@ -1,4 +1,5 @@
 import { create, all } from 'mathjs'
+import { range } from './vectors'
 
 const math = create(all)
 
@@ -82,6 +83,6 @@ export function lookup(key: unknown, keys: unknown[], values: unknown[]): unknow
 }
 
 /** Seeded into every sheet's scope, so they are available without an import. */
-export const builtins = (): Record<string, unknown> => ({ interp, lookup })
+export const builtins = (): Record<string, unknown> => ({ interp, lookup, range })
 
-export const BUILTIN_NAMES = ['interp', 'lookup']
+export const BUILTIN_NAMES = ['interp', 'lookup', 'range']

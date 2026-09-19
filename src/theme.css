@@ -111,3 +111,99 @@ pre,
 kbd {
   font-family: ui-monospace, Menlo, monospace;
 }
+
+/* ---------------------------------------------------------- a crash */
+
+/**
+ * What a caught error looks like, on every page.
+ *
+ * Lives in the shared theme because the error boundary wraps all of them, and
+ * because a stylesheet that failed to load must not be the reason the recovery
+ * screen is unreadable. Plain elements, no layout system, nothing that depends
+ * on the rest of the file.
+ */
+.crash {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 8vh 20px;
+  background: var(--paper);
+}
+
+.crash-inner {
+  max-width: 62ch;
+}
+
+.crash h1 {
+  margin: 0 0 16px;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.crash p {
+  margin: 0 0 14px;
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.crash strong {
+  color: var(--ink);
+}
+
+.crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 22px 0 28px;
+}
+
+.crash-actions button {
+  padding: 9px 16px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.crash-actions button.primary {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.crash-actions button:hover {
+  opacity: 0.88;
+}
+
+.crash details {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.crash summary {
+  cursor: pointer;
+}
+
+.crash pre {
+  max-height: 40vh;
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  background: var(--shade);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.crash-foot {
+  margin-top: 26px;
+  font-size: 12.5px;
+  color: var(--faint);
+}

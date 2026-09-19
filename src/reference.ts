@@ -43,6 +43,108 @@ export const REFERENCE: Section[] = [
       'One line at a time, top to bottom. A line is an assignment, a check, a function, a table, a heading or a note — and a symbol means whatever the line above said it means.',
     entries: [
       {
+        id: 'value',
+        code: 'b = 300 mm',
+        summary: 'A value with a unit.',
+        detail:
+          'Any unit mathjs knows works: mm, m, kN, MPa, kg, s, K, degC, l, W, and the SI prefixes on all of them. A number on its own is fine too — a factor of 1.35 has no units and does not need any.',
+        example: 'b = 300 mm\nn = 1.35\n',
+        keywords: ['assignment', 'variable', 'unit', 'mm', 'kN', 'MPa'],
+      },
+      {
+        id: 'formula',
+        code: 'W = b*h^2/6',
+        summary: 'A formula built from values above it.',
+        detail:
+          'This is the line that makes the tool worth using: it renders as the symbolic formula, then the same formula with your numbers substituted in, then the result. That middle step is what makes a calculation checkable by eye — a reviewer can see the numbers that went in without recomputing anything.',
+        example: 'b = 300 mm\nh = 500 mm\nW = b*h^2/6\n',
+        keywords: ['formula', 'expression', 'substitution', 'symbolic'],
+      },
+      {
+        id: 'display-unit',
+        code: 'sigma = M/W  -> MPa',
+        summary: 'The arrow forces the unit the result is shown in.',
+        detail:
+          'Without it the result is shown in the units it was built from. With it you get the unit you asked for, and an error if that unit is the wrong kind of quantity — a length cannot be shown in MPa, and saying so is more useful than a number that looks fine.',
+        example: 'M = 250 kN*m\nW = 1.25e7 mm^3\nsigma = M/W  -> MPa\n',
+        keywords: ['arrow', 'convert', 'display unit', 'show in'],
+      },
+      {
+        id: 'rounding',
+        code: 'b_req = ...  -> ceil 10 mm',
+        summary: 'Round to a size you can actually order.',
+        detail:
+          'ceil, floor and nearest take a step, with or without a unit: ceil 10 mm, nearest 25 mm, floor 0.5. Unlike the unit arrow, this changes the value and not just how it is shown — a required width rounded up to stock is the number every line below it has to use, and a rounding that only affected the printing would let the sheet say 290 mm while the arithmetic quietly carried on with 287.4 mm.',
+        example:
+          'b_calc = 287.4 mm\nb = b_calc  -> ceil 10 mm\nh = 500 mm\nW = b*h^2/6\n',
+        keywords: ['round', 'ceil', 'floor', 'nearest', 'sizing', 'stock', 'increment', 'up'],
+      },
+      {
+        id: 'significant-figures',
+        code: 'M = ...  -> 3 sf',
+        summary: 'Round to significant figures, or to decimal places.',
+        detail:
+          '3 sf and 2 dp both work, and both round in the unit the value reads in — three significant figures of a moment in kN·m, not of its value in joules. Like the step roundings, this changes the value. Arrows chain left to right, so a line can convert and then round: -> MPa -> 3 sf.',
+        example: 'M = 172.84 kN*m  -> 3 sf\nx = 1/3  -> 2 dp\n',
+        keywords: ['significant figures', 'sf', 'decimal places', 'dp', 'precision', 'round'],
+      },
+      {
+        id: 'range',
+        code: 'i = 1..10',
+        summary: 'A list of numbers, and arithmetic down the whole list.',
+        detail:
+          'The end is included, so 1..10 is ten numbers. Add a step with "0..1 step 0.25". A range holds plain numbers: the quantity comes from multiplying it by something with units, which keeps one rule instead of a second unit system inside brackets. Multiplying or dividing element by element uses .* and ./ — a plain * between two lists is their dot product, which is what a load combination usually wants. Powers are element-wise, so a formula written for one value works down a list unchanged. sum, max, min and mean reduce a list to a number.',
+        example:
+          'i = 1..4\nw = i*10 kN/m\nW_tot = sum(w)\n',
+        keywords: ['range', 'vector', 'list', 'series', 'load combination', 'element-wise', 'sum'],
+      },
+      {
+        id: 'figure',
+        code: 'figure section_AA "Cross-section at A-A"',
+        summary: 'A sketch or photograph, captioned and numbered.',
+        detail:
+          'Figure in the toolbar attaches an image at the cursor and writes the line for you. The words stay in the sheet and the image is kept beside it, so a photograph never lands in the middle of your text as a wall of base64. Numbering is automatic and follows the order the figures appear in. Write @section_AA anywhere in prose and it prints as "Figure 2", renumbering itself if you move things about.',
+        example: 'figure section_AA "Cross-section at A-A"\n// Dimensions taken from @section_AA\n',
+        keywords: ['figure', 'image', 'photo', 'sketch', 'caption', 'drawing', 'picture'],
+      },
+      {
+        id: 'tolerance',
+        code: 'b = 300 mm +- 2 mm',
+        summary: 'A value with an uncertainty, which propagates downwards.',
+        detail:
+          'Write ± if you prefer; +- is easier to type. Every result that depends on this value gets a ± of its own, worked out from the partial derivatives of your own formula, and results with more than one uncertain input also show which input each share of the uncertainty came from. Settings chooses between combining them statistically (in quadrature, the usual assumption) and worst case (straight sum, the pessimistic bound). The shares are attributed to the quantities named on that line, so to see which original measurement dominates, look at the line where those measurements were combined.',
+        example: 'b = 300 mm +- 2 mm\nh = 500 mm +- 3 mm\nW = b*h^2/6\n',
+        keywords: ['tolerance', 'uncertainty', 'error', 'propagation', 'plus minus', '±'],
+      },
+      {
+        id: 'check',
+        code: 'sigma <= f_ck',
+        summary: 'A check: renders as OK or NOT OK with the margin.',
+        detail:
+          'Also >=, <, >, == and !=. The verdict shows how much room is left — "33.3% spare" — or how far over it is, which is the number you actually report. A check is a line of its own and assigns nothing.',
+        example: 'sigma = 20 MPa\nf_ck = 30 MPa\nsigma <= f_ck\n',
+        keywords: ['check', 'verify', 'limit', 'OK', 'NOT OK', 'margin', 'utilisation'],
+      },
+      {
+        id: 'function',
+        code: 'A(d) = pi*d^2/4',
+        summary: 'Your own function, called like any other.',
+        detail:
+          'Call it with units — A(20 mm) — and it keeps them. Useful when the same expression appears three times in a sheet and you want one place to be wrong.',
+        example: 'A(d) = pi*d^2/4\nA_bar = A(20 mm)\n',
+        keywords: ['function', 'definition', 'reuse'],
+      },
+      {
+        id: 'solve',
+        code: 'b_req = solve sigma = f_ck for b',
+        summary: 'The reverse question: what value of b makes the two sides equal?',
+        detail:
+          'Not "what stress does this section give" but "what section do I need". Nothing symbolic happens: it tries a value of b, re-runs the lines that depend on it, and closes in until the two sides meet — so it works through any number of intermediate steps and in whatever unit b carries. Add "from 100 mm to 900 mm" when it needs telling where to look, which is also how you pick between two roots. If the two sides never cross it says so instead of returning a number.',
+        example:
+          'M = 250 kN*m\nf_ck = 30 MPa\nh = 500 mm\nb = 300 mm\nW = b*h^2/6\nsigma = M/W\nb_req = solve sigma = f_ck for b\n',
+        keywords: ['solve', 'goal seek', 'root', 'inverse', 'required', 'back calculate', 'for'],
+      },
+      {
         id: 'heading',
         code: '# Heading',
         summary: 'A heading. The first one becomes the sheet title.',
@@ -65,7 +167,7 @@ export const REFERENCE: Section[] = [
 
   {
     id: 'tables',
-    title: 'Data visualization',
+    title: 'Many cases at once',
     blurb:
       'A table checks ten sections in the space of one, and a named table becomes data the rest of the sheet can read.',
     entries: [
@@ -76,7 +178,7 @@ export const REFERENCE: Section[] = [
         detail:
           'The first row is the header. A header cell containing an = is a computed column: its formula runs for every row, using that row\'s own values. A computed column holding a comparison prints OK or NOT OK per row. Every column is formatted as a whole, so a column shares one unit, one notation and one number of decimals.',
         example:
-          'M_Ed = 250 kN*m\nf_c = 30 MPa\n\ntable\n  section | bw     | hw     | Wt = bw*hw^2/6 | ok = M_Ed/Wt <= f_c\n  A       | 300 mm | 500 mm\n  B       | 250 mm | 450 mm\nend\n',
+          'M_Ed = 250 kN*m\nf_ck = 30 MPa\n\ntable\n  section | bw     | hw     | Wt = bw*hw^2/6 | ok = M_Ed/Wt <= f_ck\n  A       | 300 mm | 500 mm\n  B       | 250 mm | 450 mm\nend\n',
         keywords: ['table', 'rows', 'cases', 'sections', 'batch'],
       },
       {
@@ -141,79 +243,6 @@ export const REFERENCE: Section[] = [
   },
 
   {
-    id: 'algebra',
-    title: 'Algebraic structures',
-    blurb:
-      'Assign values with real-world units, build checkable formulas, propagate uncertainties automatically, and isolate required variables by solving equations in reverse.',
-    entries: [    
-      {
-        id: 'value',
-        code: 'b = 300 mm',
-        summary: 'A value with a unit.',
-        detail:
-          'Any unit mathjs knows works: mm, m, kN, MPa, kg, s, K, degC, l, W, and the SI prefixes on all of them. A number on its own is fine too — a factor of 1.35 has no units and does not need any.',
-        example: 'b = 300 mm\nn = 1.35\n',
-        keywords: ['assignment', 'variable', 'unit', 'value', 'mm', 'kN', 'MPa'],
-      },
-      {
-        id: 'formula',
-        code: 'W = a*h^2/6',
-        summary: 'A formula built from values above it.',
-        detail:
-          'This is the line that makes the tool worth using: it renders as the symbolic formula, then the same formula with your numbers substituted in, then the result. That middle step is what makes a calculation checkable by eye — a reviewer can see the numbers that went in without recomputing anything.',
-        example: 'b = 300 mm\nh = 500 mm\nW = b*h^2/6\n',
-        keywords: ['formula', 'values', 'expression', 'substitution', 'symbolic'],
-      },
-      {
-        id: 'display-unit',
-        code: 'sigma = M/W  -> MPa',
-        summary: 'The arrow forces the unit the result is shown in.',
-        detail:
-          'Without it the result is shown in the units it was built from. With it you get the unit you asked for, and an error if that unit is the wrong kind of quantity — a length cannot be shown in MPa, and saying so is more useful than a number that looks fine.',
-        example: 'M = 250 kN*m\nW = 1.25e7 mm^3\nsigma = M/W  -> MPa\n',
-        keywords: ['arrow', 'convert', 'unit', 'convert', 'display unit', 'show in'],
-      },
-      {
-        id: 'tolerance',
-        code: 'b = 300 mm +- 2 mm',
-        summary: 'A value with an uncertainty, which propagates downwards.',
-        detail:
-          'Write ± if you prefer; +- is easier to type. Every result that depends on this value gets a ± of its own, worked out from the partial derivatives of your own formula, and results with more than one uncertain input also show which input each share of the uncertainty came from. Settings chooses between combining them statistically (in quadrature, the usual assumption) and worst case (straight sum, the pessimistic bound). The shares are attributed to the quantities named on that line, so to see which original measurement dominates, look at the line where those measurements were combined.',
-        example: 'b = 300 mm +- 2 mm\nh = 500 mm +- 3 mm\nW = b*h^2/6\n',
-        keywords: ['tolerance', 'uncertainty', 'error', 'propagation', 'plus minus', '±'],
-      },
-      {
-        id: 'check',
-        code: 'sigma <= f_c',
-        summary: 'A check: renders as OK or NOT OK with the margin.',
-        detail:
-          'Also >=, <, >, == and !=. The verdict shows how much room is left — "33.3% spare" — or how far over it is, which is the number you actually report. A check is a line of its own and assigns nothing.',
-        example: 'sigma = 20 MPa\nf_c = 30 MPa\nsigma <= f_c\n',
-        keywords: ['check', 'verify','spare', 'limit', 'OK', 'NOT OK', 'margin', 'utilisation'],
-      },
-      {
-        id: 'function',
-        code: 'A(r) = pi*r^2',
-        summary: 'Your own function, called like any other.',
-        detail:
-          'Call it with units, or values — A(20 mm), A(b) — and it keeps them. Useful when the same expression appears three times in a sheet and you want one place to be wrong.',
-        example: 'A(r) = pi*r^2\nA_bar = A(20 mm)\n \nb = 300 mm\nA_bValue = A(b)',
-        keywords: ['function', 'definition', 'reuse', 'variable', 'parameter'],
-      },
-      {
-        id: 'solve',
-        code: 'b_req = solve sigma = f_c for b',
-        summary: 'The reverse question: what value of b makes the two sides equal?',
-        detail:
-          'Not "what stress does this section give" but "what section do I need". Nothing symbolic happens: it tries a value of b, re-runs the lines that depend on it, and closes in until the two sides meet — so it works through any number of intermediate steps and in whatever unit b carries. Add "from 100 mm to 900 mm" when it needs telling where to look, which is also how you pick between two roots. If the two sides never cross it says so instead of returning a number.',
-        example:
-          'M = 250 kN*m\nf_c = 30 MPa\nh = 500 mm\nb = 300 mm\nW = b*h^2/6\nsigma = M/W\nb_req = solve sigma = f_c for b\n',
-        keywords: ['solve', 'goal seek', 'root', 'inverse', 'required', 'back calculate', 'for'],
-      },
-    ],
-  },
-
-  {
     id: 'units',
     title: 'Units and numbers',
     prose: [
@@ -242,7 +271,7 @@ export const REFERENCE: Section[] = [
 
   {
     id: 'errors',
-    title: 'Errors',
+    title: 'When a line will not compute',
     blurb: 'What each message means, and what to do about it.',
     entries: [
       {
@@ -305,6 +334,14 @@ export const REFERENCE: Section[] = [
         text: 'Several sheets sharing one title block — client, author, checker, revision — printed as one package with "Sheet 2 of 5" on each. Sheets carry no metadata of their own. The ↑ ↓ buttons in the sidebar set the order they print in, and a sheet can be moved to another project from the Project panel.',
       },
       {
+        heading: 'The checks, first',
+        text: 'Every check in a sheet is listed at the top of the document with its verdict and its margin, and on screen each row jumps to the line it came from. A printed package gets the same list for every sheet at once, on its own page at the front — which is the page a reviewer reads first and the only one some of them read. A verdict column inside a table contributes one row saying how many of its rows held.',
+      },
+      {
+        heading: 'What a printed sheet says about itself',
+        text: 'Every printed page carries the build that produced it, and every sheet ends with a line saying that Longhand is a calculation aid and that the author and checker named in the title block remain responsible. A calculation that goes into a submission has to be reproducible and has to say what it does not claim.',
+      },
+      {
         heading: 'Printing',
         text: 'Print gives you the sheet you are looking at, with the editor hidden — Cmd/Ctrl+P does the same. Project → Preview whole project shows the package as one document first, so you can check the order before committing it to paper.',
       },
@@ -335,16 +372,30 @@ export const REFERENCE: Section[] = [
         heading: 'Undo',
         text: 'Deleting a sheet asks twice and then offers to put it back; so does deleting a project, with all its sheets. Text editing has ordinary undo inside the editor.',
       },
+      {
+        heading: 'History',
+        text: 'History keeps snapshots of the sheet you are on — one taken automatically every so often while you work, and one whenever you press Save a revision. Opening a snapshot shows a line-by-line diff against the sheet as it stands, which is how "what changed since revision B" gets answered. Restoring takes a snapshot of where you are first, so looking through history can never be the thing that loses work.',
+      },
+      {
+        heading: 'Sharing a sheet by link',
+        text: 'Share compresses the whole calculation, figures and all, into the link itself, after the # — the part of an address a browser never sends to a server. So a link opens without an account and without anything being uploaded, and it opens read-only with a button to make a copy. The other side of that: anyone holding the link can read the sheet, and whatever you send it through holds it too. A link is a snapshot, so changing the sheet afterwards does not change what an already-sent link opens.',
+      },
+      {
+        heading: 'Proving the cache is honest',
+        text: 'Longhand reuses everything above the first line you edited, which is what keeps a long sheet responsive. Settings → Trust → Recalculate from scratch throws that away, runs the sheet again from nothing and says whether the two agree line for line.',
+      },
     ],
   },
 
   {
     id: 'keyboard',
-    title: 'Keyboard shortcuts',
+    title: 'Keyboard',
     entries: [
       { id: 'k-new', code: 'Alt + N', summary: 'New sheet in this project.' },
       { id: 'k-move', code: 'Alt + [ / ]', summary: 'Previous / next sheet.' },
       { id: 'k-panels', code: 'Alt + P / H / ,', summary: 'Project, Help, Settings.' },
+      { id: 'k-share', code: 'Alt + S', summary: 'Share this sheet as a link.' },
+      { id: 'k-history', code: 'Alt + R', summary: 'History and revisions.' },
       { id: 'k-save', code: 'Cmd/Ctrl + S', summary: 'Save this sheet as a file.' },
       { id: 'k-print', code: 'Cmd/Ctrl + P', summary: 'Print.' },
       { id: 'k-escape', code: 'Escape', summary: 'Close whatever is open.' },

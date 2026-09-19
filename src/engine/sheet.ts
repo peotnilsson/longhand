@@ -5,7 +5,7 @@ import {
   formatValue,
   formatLike,
   formatNumber,
-  isUnitValue,
+  isVector,
   displayUnit,
   toNumberIn,
 } from './units'
@@ -13,6 +13,8 @@ import { symbolToTex, toTex, valueToTex, sameTex } from './tex'
 import { definitionIndex, parseSolve, solve, SolveError, type SolveSetup } from './solve'
 import { builtins } from './builtins'
 import { splitNote } from './source'
+import { applyDirective, parseDirective, splitArrows } from './rounding'
+import { elementwisePowers, expandRanges } from './vectors'
 import {
   collectSymbols,
   propagate,
@@ -62,6 +64,7 @@ export type Line =
       summary: string
       note?: string
     }
+  | { kind: 'figure'; id: string; caption: string; number: number; summary: string }
   | { kind: 'table'; headers: string[]; rows: TableCell[][]; summary: string }
   | { kind: 'plot'; data: PlotData; summary: string }
   | { kind: 'error'; source: string; message: string }
@@ -75,6 +78,8 @@ interface Context {
   scope: Record<string, unknown>
   sigmas: Record<string, unknown>
   definitions: Definition[]
+  /** Figures are numbered in the order they appear, which is the only order that makes sense. */
+  figures: number
 }
 
 export interface SheetOptions {
@@ -98,6 +103,7 @@ const cloneContext = (context: Context): Context => ({
   scope: { ...context.scope },
   sigmas: { ...context.sigmas },
   definitions: [...context.definitions],
+  figures: context.figures,
 })
 
 // ---------------------------------------------------------------- dependencies
@@ -109,7 +115,7 @@ export function buildGraph(source: string): Record<string, string[]> {
     const line = raw.trim()
     if (!line || line.startsWith('#') || line.startsWith('//')) continue
     try {
-      const node = math.parse(line.split('->')[0])
+      const node = math.parse(expandRanges(splitArrows(line).body))
       const type = (node as any).type
       if (type === 'AssignmentNode' || type === 'FunctionAssignmentNode') {
         const name = (node as any).name ?? (node as any).object?.name
@@ -134,6 +140,9 @@ function definedNames(source: string): Set<string> {
 
 function explain(error: unknown, defined: Set<string>): string {
   const message = error instanceof Error ? error.message : String(error)
+  if (/must be square|Matrix must be square|two dimensional/i.test(message)) {
+    return `${message} — if one of these is a list, write the operation element by element: .* to multiply, ./ to divide.`
+  }
   const undefinedSymbol = message.match(/Undefined symbol ([A-Za-z_][A-Za-z0-9_]*)/)
   if (undefinedSymbol && defined.has(undefinedSymbol[1])) {
     return `${undefinedSymbol[1]} is used here but defined further down. Move it above this line — or, if each defines the other, that is a circular reference.`
@@ -175,14 +184,10 @@ function evaluateStatement(
   const { body: withoutNote, note } = splitNote(line)
   line = withoutNote
 
-  // Optional display unit:  sigma = M_Ed/W  -> MPa
-  let body = line
-  let displayUnit: string | null = null
-  const arrow = line.lastIndexOf('->')
-  if (arrow !== -1) {
-    body = line.slice(0, arrow).trim()
-    displayUnit = line.slice(arrow + 2).trim()
-  }
+  // Everything after an arrow:  -> MPa  -> 3 sf  -> ceil 10 mm, chained.
+  const arrows = splitArrows(line)
+  let body = arrows.body
+  const directives = arrows.directives
 
   // Optional uncertainty:  b = 300 mm ± 2 mm
   let sigmaSource: string | null = null
@@ -196,15 +201,20 @@ function evaluateStatement(
   }
 
   try {
-    const node = math.parse(body)
+    const node = math.parse(expandRanges(body))
+    // `node` is what gets rendered — the formula exactly as written. `runnable`
+    // is what gets evaluated, with `^` made element-wise so the same formula
+    // also works down a list. Keeping them separate is what lets the page show
+    // d² while the arithmetic behind it handles a vector of diameters.
+    const runnable = elementwisePowers(node)
     const type = (node as any).type
 
     // ---- function definition:  A(d) = pi*d^2/4
     if (type === 'FunctionAssignmentNode') {
       const functionName = (node as any).name
       const redefined = context.scope[functionName] !== undefined
-      node.evaluate(context.scope)
-      context.definitions.push({ name: functionName, node })
+      runnable.evaluate(context.scope)
+      context.definitions.push({ name: functionName, node: runnable })
       return {
         kind: 'definition',
         tex: toTex(node, context.scope),
@@ -219,9 +229,10 @@ function evaluateStatement(
     // ---- check:  sigma <= f_ck
     if (type === 'OperatorNode' && COMPARISONS.has((node as any).op)) {
       const [leftNode, rightNode] = (node as any).args
-      const left = leftNode.evaluate(context.scope)
-      const right = rightNode.evaluate(context.scope)
-      const pass = Boolean(node.evaluate(context.scope))
+      const [leftRunnable, rightRunnable] = (runnable as any).args
+      const left = leftRunnable.evaluate(context.scope)
+      const right = rightRunnable.evaluate(context.scope)
+      const pass = Boolean(runnable.evaluate(context.scope))
       const operator = COMPARISON_TEX[(node as any).op]
 
       const symbolic = `${toTex(leftNode, context.scope)} ${operator} ${toTex(rightNode, context.scope)}`
@@ -270,10 +281,9 @@ function evaluateStatement(
     // redefinition of itself.
     const previous = name === null ? undefined : context.scope[name]
 
-    let value = node.evaluate(context.scope)
-    if (displayUnit) {
-      if (!isUnitValue(value)) throw new Error(`Cannot convert a plain number to ${displayUnit}`)
-      value = (value as any).to(displayUnit)
+    let value = runnable.evaluate(context.scope)
+    for (const directive of directives) {
+      value = applyDirective(value, parseDirective(directive), context.scope)
     }
 
     // Redefinition is legal — a staged calculation sometimes revises a value —
@@ -287,15 +297,23 @@ function evaluateStatement(
           : `${name} was ${formatValue(previous, precision)} above — this redefines it for the lines below.`
 
     if (isAssignment) {
+      // Evaluating an assignment node has already put the *unrounded* value in
+      // the scope, so this line is what makes `-> ceil 10 mm` mean anything:
+      // without it the sheet would print 290 mm and every line below it would
+      // quietly carry on with 287.4 mm.
       context.scope[name!] = value
-      context.definitions.push({ name: name!, node })
+      context.definitions.push({ name: name!, node: runnable })
     }
 
     const rhs: MathNode = isAssignment ? (node as any).value : node
 
-    // uncertainty: explicit on this line, or propagated from uncertain inputs
+    // uncertainty: explicit on this line, or propagated from uncertain inputs.
+    // A list has no single ±, and asking for the partial derivatives of one
+    // produces a matrix of them, so a vector result carries no tolerance.
     let tolerance: ToleranceView | undefined
-    if (sigmaSource) {
+    if (isVector(value)) {
+      tolerance = undefined
+    } else if (sigmaSource) {
       const sigma = math.parse(sigmaSource).evaluate(context.scope)
       if (name) context.sigmas[name] = sigma
       tolerance = toleranceView(sigma, [], value, precision)
@@ -487,7 +505,7 @@ function evaluateTable(
         return
       }
       try {
-        const value = math.parse(cell).evaluate(rowScope)
+        const value = elementwisePowers(math.parse(expandRanges(cell))).evaluate(rowScope)
         rowScope[column.name] = value
         row.push({ kind: 'value', value })
       } catch (error) {
@@ -502,7 +520,9 @@ function evaluateTable(
         continue
       }
       try {
-        const value = math.parse(column.expression!).evaluate(rowScope)
+        const value = elementwisePowers(
+          math.parse(expandRanges(column.expression!)),
+        ).evaluate(rowScope)
         rowScope[column.name] = value
         row.push(
           typeof value === 'boolean'
@@ -572,6 +592,69 @@ function evaluateTable(
   }
 }
 
+/**
+ * `figure sectionAA "Cross-section at A-A"`
+ *
+ * The words live in the sheet — they are text, and text is what a sheet is
+ * made of — while the image itself is held beside the sheet under the id, so a
+ * photograph never has to be pasted into the middle of a calculation as a wall
+ * of base64. Numbering is automatic and by position, because a figure the
+ * author has to renumber by hand is a figure that ends up wrong.
+ */
+function evaluateFigure(line: string, context: Context): Line {
+  const match = line.match(/^figure(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*(?:"([^"]*)")?\s*$/)
+  if (!match) {
+    return {
+      kind: 'error',
+      source: line,
+      message: 'Write a figure as:  figure section_AA "Cross-section at A-A"',
+    }
+  }
+  const [, id, caption] = match
+  context.figures += 1
+  return {
+    kind: 'figure',
+    id: id ?? `figure_${context.figures}`,
+    caption: caption ?? '',
+    number: context.figures,
+    summary: `Figure ${context.figures}`,
+  }
+}
+
+/**
+ * `@section_AA` in prose becomes "Figure 2".
+ *
+ * Done after the whole sheet has run, because a reference can point at a
+ * figure further down and the number is not known until then.
+ */
+function resolveFigureReferences(results: Line[]): Line[] {
+  const numbers = new Map<string, number>()
+  for (const line of results) {
+    if (line.kind === 'figure') numbers.set(line.id, line.number)
+  }
+  if (numbers.size === 0) return results
+
+  const swap = (text: string): string =>
+    text.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, id: string) =>
+      numbers.has(id) ? `Figure ${numbers.get(id)}` : whole,
+    )
+  const swapNote = (note?: string) => (note === undefined ? undefined : swap(note))
+
+  return results.map((line) => {
+    if (line.kind === 'prose' || line.kind === 'note') {
+      const text = swap(line.text)
+      return text === line.text ? line : { ...line, text }
+    }
+    if (
+      (line.kind === 'calc' || line.kind === 'definition' || line.kind === 'check') &&
+      line.note
+    ) {
+      return { ...line, note: swapNote(line.note) }
+    }
+    return line
+  })
+}
+
 const SAMPLES = 48
 
 function evaluatePlot(line: string, context: Context, defined: Set<string>): Line {
@@ -589,7 +672,7 @@ function evaluatePlot(line: string, context: Context, defined: Set<string>): Lin
   const [, expression, variable, fromSource, toSource] = match
 
   try {
-    const exprNode = math.parse(expression)
+    const exprNode = elementwisePowers(math.parse(expandRanges(expression)))
     const from = math.parse(fromSource).evaluate(context.scope)
     const to = math.parse(toSource).evaluate(context.scope)
 
@@ -698,6 +781,8 @@ function runLines(
       result = { kind: 'prose', text: line.replace(/^\/\/\s*/, '') }
     } else if (/^import\b/.test(line)) {
       result = evaluateImport(splitNote(line).body, context, options, libraries, depth)
+    } else if (/^figure\b/.test(line)) {
+      result = evaluateFigure(splitNote(line).body, context)
     } else if (/^plot\b/.test(line)) {
       result = evaluatePlot(splitNote(line).body, context, defined)
     } else if (/^table\b/.test(line)) {
@@ -761,7 +846,7 @@ export function evaluateSheet(source: string, options: SheetOptions = {}): Line[
   // Incremental recompute: everything above the first edited line is unchanged,
   // because evaluation is strictly sequential.
   let start = 0
-  let context: Context = { scope: builtins(), sigmas: {}, definitions: [] }
+  let context: Context = { scope: builtins(), sigmas: {}, definitions: [], figures: 0 }
   const results: Line[] = []
   const snapshots: Context[] = []
 
@@ -788,7 +873,56 @@ export function evaluateSheet(source: string, options: SheetOptions = {}): Line[
   runLines(lines, context, settings, libraries, defined, 0, results, snapshots, start)
 
   cache = { key, lines, results, snapshots }
-  return results
+  return resolveFigureReferences(results)
+}
+
+/**
+ * Throw the incremental cache away.
+ *
+ * Reusing everything above the first edited line is what keeps a long sheet
+ * responsive, and it is also the one place where the app could quietly show a
+ * stale answer. A user who suspects that needs a way to prove it, which is what
+ * this and `recomputeCold` are for.
+ */
+export function clearCache(): void {
+  cache = null
+}
+
+export interface ColdRun {
+  /** True when the cached results and a run from nothing agree line for line. */
+  equal: boolean
+  lines: number
+  /** The first line that differed, 1-based, or null when nothing did. */
+  firstDifference: number | null
+  milliseconds: number
+}
+
+/**
+ * Run the sheet twice — once as the app has it, once from nothing — and say
+ * whether they agree. An engineer should not have to take the cache's word for
+ * it, and neither should we.
+ */
+export function recomputeCold(source: string, options: SheetOptions = {}): ColdRun {
+  const cached = evaluateSheet(source, options).map((line) => JSON.stringify(line))
+  clearCache()
+  const started = Date.now()
+  const cold = evaluateSheet(source, options).map((line) => JSON.stringify(line))
+  const milliseconds = Date.now() - started
+
+  const length = Math.max(cached.length, cold.length)
+  let firstDifference: number | null = null
+  for (let index = 0; index < length; index += 1) {
+    if (cached[index] !== cold[index]) {
+      firstDifference = index + 1
+      break
+    }
+  }
+  return {
+    equal: firstDifference === null,
+    lines: cold.length,
+    firstDifference,
+    milliseconds,
+  }
 }
 
 /** The first heading in the sheet, used as the document title when printing. */

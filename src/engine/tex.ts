@@ -68,6 +68,19 @@ const escapeName = (name: string): string => name.replace(/_/g, '\\_')
  * beside its own ± printed the other is the kind of thing a reviewer stops at.
  */
 export function valueToTex(formatted: string, scope: Record<string, unknown>): string {
+  // A list, as formatVector writes it: "[1, 2, 3] mm" or "[1, 2, …] mm (20 values)".
+  const list = formatted.match(/^\[(.*)\]\s*([^\s(]*)\s*(\(\d+ values\))?$/)
+  if (list) {
+    const [, body, unit, count] = list
+    const elements = body
+      .split(',')
+      .map((element) => element.trim())
+      .map((element) => (element === '…' ? '\\dots' : numberToTex(element)))
+      .join(',\\; ')
+    const tail = count ? `\\;\\text{${count.replace(/[()]/g, '')}}` : ''
+    return `\\left[${elements}\\right]${unit ? `~${unitToTex(unit)}` : ''}${tail}`
+  }
+
   const match = formatted.match(/^(-?[\d.]+(?:e[+-]?\d+)?)(\s+(.*))?$/)
   if (match) {
     const [, number, , unit] = match

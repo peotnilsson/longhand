@@ -42,9 +42,19 @@ body {
 }
 
 .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.wordmark.quiet {
+  font-weight: 500;
+  color: var(--faint);
 }
 
 .top nav {
@@ -399,4 +409,67 @@ body {
     gap: 12px;
     font-size: 13px;
   }
+}
+
+/**
+ * A phone header holds a name and one button.
+ *
+ * The secondary links are all reachable from the footer, and a header that
+ * wraps or pushes the page sideways is worse than a header that says less —
+ * adding the verification link is what tipped it past 390px.
+ */
+@media (max-width: 560px) {
+  .top nav a:not(.cta) {
+    display: none;
+  }
+
+  /* The footer carries every link the header just dropped, so it has to be
+     allowed to use two lines rather than pushing the page sideways. */
+  .foot-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    height: auto;
+    padding-top: 20px;
+    padding-bottom: 24px;
+  }
+
+  .foot nav {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+}
+
+/* ------------------------------------------------------------- verified */
+
+.verified {
+  padding: 70px 0 0;
+}
+
+.verified h2 {
+  margin: 0 0 14px;
+  font-size: 22px;
+  letter-spacing: -0.015em;
+}
+
+.verified p {
+  margin: 0 0 14px;
+  max-width: 68ch;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* The caveat sits beside the claim rather than under it, so nobody reads one
+   without the other. */
+.verified-note {
+  padding: 18px 20px;
+  border-left: 2px solid var(--rule-strong);
+  background: var(--shade);
+  border-radius: 0 10px 10px 0;
+}
+
+.verified-note p {
+  margin: 0;
+  font-size: 14px;
 }

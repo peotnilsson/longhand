@@ -2,6 +2,29 @@ import { create, all } from 'mathjs'
 
 export const math = create(all, {})
 
+/**
+ * Units mathjs does not ship, which engineers do use.
+ *
+ * Added rather than worked around: a sheet that has to write 1000 psi instead
+ * of 1 ksi is a sheet that will be written somewhere else. Each definition is
+ * exact and follows from units mathjs already has, so nothing here introduces
+ * a number of its own.
+ */
+const EXTRA_UNITS: [string, string][] = [
+  ['ksi', '1000 psi'],
+  ['kip', '1000 lbf'],
+  ['klf', '1000 lbf/ft'],
+  ['psf', '1 lbf/ft^2'],
+]
+
+for (const [name, definition] of EXTRA_UNITS) {
+  try {
+    ;(math as any).createUnit(name, definition)
+  } catch {
+    /* already defined by a future mathjs: its definition wins, and that is fine */
+  }
+}
+
 export type UnitPowers = Record<string, number>
 
 export const isUnitValue = (value: unknown): boolean =>
@@ -86,6 +109,71 @@ export const formatNumber = (value: unknown, precision: number): string =>
     .format(value, { notation: 'auto', precision, lowerExp: -4, upperExp: 5 } as any)
     .replace(/e\+/g, 'e')
 
+/**
+ * What a derived quantity should be read in when its own units are not usable.
+ *
+ * mathjs picks this itself by searching its unit table, and the choice is an
+ * accident of what is in the table: defining `ksi` so that engineers can write
+ * it silently moved every stress in the app from MPa to ksi, and defining
+ * `psf` moved them to pounds per square foot. A calculation tool cannot have
+ * its output change because a unit was added at the other end of the codebase.
+ *
+ * So the choice is made here instead, from a short list per dimension, taking
+ * the first candidate that puts the number in a range a person reads without
+ * counting zeros. SI first, because that is what the sheets are written in.
+ */
+const DISPLAY_PREFERENCES = [
+  ['Pa', ['MPa', 'kPa', 'GPa', 'Pa']],
+  ['N', ['kN', 'N', 'MN']],
+  ['J', ['kJ', 'J', 'MJ']],
+  ['W', ['kW', 'W', 'MW']],
+  ['m', ['mm', 'm', 'km']],
+  ['m^2', ['mm^2', 'm^2']],
+  ['m^3', ['mm^3', 'm^3', 'L']],
+  ['kg', ['kg', 'g', 'tonne']],
+  ['N/m', ['kN/m', 'N/m']],
+  ['N*m', ['kN*m', 'N*m']],
+  ['m/s', ['m/s', 'km/h']],
+  ['m/s^2', ['m/s^2']],
+  ['kg/m^3', ['kg/m^3']],
+  ['s', ['s', 'min', 'h']],
+] as const
+
+/** dimension signature -> the units to try, in order. Built once. */
+const byDimension = new Map<string, readonly string[]>()
+for (const [sample, candidates] of DISPLAY_PREFERENCES) {
+  const key = dimensionKey(sample)
+  if (key && !byDimension.has(key)) byDimension.set(key, candidates)
+}
+
+/** Readable without counting zeros: the same window preferredUnit uses. */
+const readable = (magnitude: number): boolean =>
+  magnitude === 0 || (magnitude >= 1e-3 && magnitude < 1e5)
+
+function curatedUnit(value: unknown): string | null {
+  if (!isUnitValue(value)) return null
+  let key: string
+  try {
+    key = JSON.stringify((value as any).dimensions)
+  } catch {
+    return null
+  }
+  const candidates = byDimension.get(key)
+  if (!candidates) return null
+
+  let fallback: string | null = null
+  for (const candidate of candidates) {
+    try {
+      const magnitude = Math.abs((value as any).toNumber(candidate))
+      if (fallback === null) fallback = candidate
+      if (readable(magnitude)) return candidate
+    } catch {
+      /* not convertible: try the next */
+    }
+  }
+  return fallback
+}
+
 /** The unit a quantity should be displayed in, or null to let mathjs decide. */
 export function preferredUnit(value: unknown): string | null {
   if (!isUnitValue(value)) return null
@@ -110,12 +198,55 @@ export function preferredUnit(value: unknown): string | null {
  * something no engineer would ever write.
  */
 export function formatValue(value: unknown, precision: number): string {
-  const target = preferredUnit(value)
+  if (isVector(value)) return formatVector(toVector(value), precision)
+  const target = preferredUnit(value) ?? curatedUnit(value)
   if (target) {
     return `${formatNumber((value as any).toNumber(target), precision)} ${target}`
   }
   return formatNumber(value, precision)
 }
+
+/** A range or a list of quantities — anything with elements rather than one value. */
+export const isVector = (value: unknown): boolean =>
+  Array.isArray(value) ||
+  (typeof value === 'object' && value !== null && (value as any).isMatrix === true)
+
+export const toVector = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : ((value as any).toArray() as unknown[])
+
+/** Past this many elements a printed list stops being read and starts being skipped. */
+const SHOWN = 10
+
+/**
+ * A list, with the unit said once.
+ *
+ * mathjs would print [1 mm, 2 mm, 3 mm], which is four repetitions of a fact
+ * the reader already has. Formatting the elements as a column — the same rule
+ * a table uses — keeps the decimal points aligned and lets the unit go at the
+ * end, the way it is written on paper.
+ */
+export function formatVector(values: unknown[], precision: number): string {
+  if (values.length === 0) return '[]'
+  if (values.some((value) => isVector(value))) {
+    return `${values.length} row${values.length === 1 ? '' : 's'} × ${
+      toVector(values[0]).length
+    } columns`
+  }
+
+  const shown = values.length > SHOWN ? values.slice(0, SHOWN) : values
+  const formatted = formatColumn(shown, precision)
+  const unit = displayUnit(shown.find((value) => isUnitValue(value)))
+
+  const bare = unit
+    ? formatted.map((text) => text.replace(new RegExp(`\\s*${escapeUnit(unit)}$`), ''))
+    : formatted
+
+  const body = values.length > SHOWN ? `${bare.join(', ')}, …` : bare.join(', ')
+  const tail = values.length > SHOWN ? ` (${values.length} values)` : ''
+  return `[${body}]${unit ? ` ${unit}` : ''}${tail}`
+}
+
+const escapeUnit = (unit: string): string => unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Format in whatever unit `reference` is displayed in, so that a value and its
@@ -157,7 +288,7 @@ const formatReference = (reference: unknown, target: string, precision: number):
  */
 export function displayUnit(value: unknown): string | null {
   if (!isUnitValue(value)) return null
-  const preferred = preferredUnit(value)
+  const preferred = preferredUnit(value) ?? curatedUnit(value)
   if (preferred) return preferred
   const formatted = math.format(value, { notation: 'fixed', precision: 14 } as any)
   const text = formatted.match(/^[-+\d.eE]+\s*(.*)$/)?.[1]?.trim()
@@ -182,6 +313,7 @@ const ENGINEERING = [
   's', 'min', 'h', 'Hz', 'rpm', 'J', 'kJ', 'MJ', 'W', 'kW', 'MW', 'kWh',
   'K', 'degC', 'deg', 'rad', 'L', 'mL', 'm/s', 'km/h', 'm/s^2',
   'A', 'V', 'ohm', 'F', 'C',
+  'psi', 'ksi', 'kip', 'klf', 'psf', 'lbf', 'inch', 'ft', 'bar', 'atm',
 ]
 
 export function unitNames(): string[] {
@@ -221,7 +353,12 @@ export function formatColumn(values: unknown[], precision: number): string[] {
   // One decimal count for the whole column, taken from its largest value, so
   // the decimal points line up: 20.00 / 29.63 / 61.22, never 20 / 29.63 / 61.224.
   // Whole numbers stay whole: nobody writes a 300 mm beam width as 300.0 mm.
-  const allIntegers = numbers.every((n) => !Number.isFinite(n) || Number.isInteger(n))
+  // Whole *within floating-point noise*: a unit value is stored in SI, so
+  // 3 * 100 mm comes back as 300.00000000000006 mm and a strict integer test
+  // would print the whole column to one decimal place.
+  const allIntegers = numbers.every(
+    (n) => !Number.isFinite(n) || Math.abs(n - Math.round(n)) <= Math.abs(n) * 1e-10,
+  )
   const decimals = allIntegers
     ? 0
     : largest > 0

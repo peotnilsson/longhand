@@ -1,14 +1,24 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { evaluateSheet, sheetTitle, type Line, type ToleranceMode } from './engine'
+import type { EditorView } from '@codemirror/view'
+import {
+  evaluateSheet,
+  recomputeCold,
+  sheetTitle,
+  type ColdRun,
+  type Line,
+  type ToleranceMode,
+} from './engine'
 import { Editor } from './editor'
+import { Mark } from './Mark'
 import { Plot } from './Plot'
 import {
   activeProject,
   activeSheet,
   backupAgeDays,
   duplicateNames,
+  emptyMeta,
   loadStore,
   moveSheet,
   moveSheetToProject,
@@ -16,9 +26,15 @@ import {
   newProject,
   removeSheet,
   restore,
+  restoreRevision,
   saveStore,
   slug,
+  snapshotSheet,
+  dueForSnapshot,
+  deleteRevision,
+  referencedFigures,
   type Deleted,
+  type Revision,
   type Project,
   type ProjectMeta,
   type Settings,
@@ -27,6 +43,12 @@ import {
   type Theme,
 } from './store'
 import { findExample } from './examples'
+import { summariseChecks, tightest, verdictLine, type SheetChecks } from './checks'
+import { DISCLAIMER, buildStamp } from './build'
+import { ISSUES_URL, issueUrl, mailtoUrl, optedOut, setOptedOut, start, track, trackOnce } from './analytics'
+import { LONG_LINK, importedNames, shareLink, sheetFromLocation, type SharedSheet } from './share'
+import { describeDiff, diffLines, withContext } from './diff'
+import { figureId, figuresSize, humanSize, prepareImage, LARGE_FIGURE } from './figures'
 import {
   chooseExistingFile,
   chooseNewFile,
@@ -42,7 +64,17 @@ import {
 } from './disk'
 import './App.css'
 
-function Rendered({ line }: { line: Line }) {
+function Rendered({
+  line,
+  figures,
+  anchor,
+}: {
+  line: Line
+  /** Images for `figure` lines, held beside the sheet rather than in it. */
+  figures?: Record<string, string>
+  /** An id to jump to from the checks summary. */
+  anchor?: string
+}) {
   switch (line.kind) {
     case 'blank':
       return <div className="blank" />
@@ -73,9 +105,29 @@ function Rendered({ line }: { line: Line }) {
         </div>
       )
 
+    case 'figure': {
+      const source = figures?.[line.id]
+      return (
+        <figure className="sheet-figure">
+          {source ? (
+            <img src={source} alt={line.caption || `Figure ${line.number}`} />
+          ) : (
+            <div className="figure-missing no-print">
+              Figure {line.number} has no image yet. Put the cursor on this line and use{' '}
+              <strong>Figure</strong> in the toolbar to attach one to <code>{line.id}</code>.
+            </div>
+          )}
+          <figcaption>
+            <strong>Figure {line.number}</strong>
+            {line.caption ? ` — ${line.caption}` : ''}
+          </figcaption>
+        </figure>
+      )
+    }
+
     case 'check':
       return (
-        <div className={`check ${line.pass ? 'pass' : 'fail'}`}>
+        <div id={anchor} className={`check ${line.pass ? 'pass' : 'fail'}`}>
           <div>
             <Tex tex={line.tex} className="calc" />
             {line.note && <p className="line-note">{line.note}</p>}
@@ -225,6 +277,67 @@ function TitleBlock({
   )
 }
 
+/**
+ * The verdicts, at the top, before the working.
+ *
+ * A reviewer opening a calculation wants one thing first: did it pass, and by
+ * how much. A sheet buries that among three pages of algebra, so this puts it
+ * where the eye lands — and on screen each row jumps to the line it came from,
+ * which is the other half of the same problem.
+ */
+function ChecksSummary({
+  summary,
+  onJump,
+  anchorFor,
+}: {
+  summary: SheetChecks
+  onJump?: (index: number) => void
+  anchorFor: (index: number) => string
+}) {
+  if (summary.checks.length === 0) return null
+  const closest = tightest(summary)
+
+  return (
+    <section className={summary.failed ? 'checks-summary has-failure' : 'checks-summary'}>
+      <header>
+        <h3>Checks</h3>
+        <span className={summary.failed ? 'overall fail' : 'overall pass'}>
+          {verdictLine(summary)}
+        </span>
+      </header>
+      <ol>
+        {summary.checks.map((check, index) => (
+          <li key={`${check.index}-${index}`} className={check.pass ? 'pass' : 'fail'}>
+            <span className="what">
+              {onJump ? (
+                <a
+                  href={`#${anchorFor(check.index)}`}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    onJump(check.index)
+                  }}
+                >
+                  {check.label}
+                </a>
+              ) : (
+                check.label
+              )}
+              {check.section && <em className="where">{check.section}</em>}
+            </span>
+            <span className="badge">{check.pass ? 'OK' : 'NOT OK'}</span>
+            <span className="margin">{check.margin ?? ''}</span>
+          </li>
+        ))}
+      </ol>
+      {closest && !summary.failed && (
+        <p className="tightest">
+          Closest to the limit: <strong>{closest.label}</strong>, {closest.margin}.
+        </p>
+      )}
+    </section>
+  )
+}
+
 function SheetDocument({
   sheet,
   project,
@@ -232,6 +345,8 @@ function SheetDocument({
   mode,
   libraries,
   position,
+  lines: given,
+  onJump,
 }: {
   sheet: Sheet
   project: Project
@@ -239,12 +354,22 @@ function SheetDocument({
   mode: ToleranceMode
   libraries: Record<string, string>
   position?: string
+  /**
+   * Already-evaluated lines. The package view works them out once for the
+   * whole project — it needs them for the package summary anyway — and passing
+   * them in stops every sheet being evaluated twice.
+   */
+  lines?: Line[]
+  onJump?: (index: number) => void
 }) {
-  const lines = useMemo(
-    () => evaluateSheet(sheet.source, { precision, mode, libraries }),
-    [sheet.source, precision, mode, libraries],
+  const own = useMemo(
+    () => (given ? null : evaluateSheet(sheet.source, { precision, mode, libraries })),
+    [given, sheet.source, precision, mode, libraries],
   )
+  const lines = given ?? own!
   const title = useMemo(() => sheetTitle(sheet.source), [sheet.source])
+  const checks = useMemo(() => summariseChecks(sheet.source, lines), [sheet.source, lines])
+  const anchorFor = useCallback((index: number) => `check-${sheet.id}-${index}`, [sheet.id])
 
   // The title block already shows the sheet's title, so the heading it came
   // from would print it a second time. Skip that one line only.
@@ -256,9 +381,22 @@ function SheetDocument({
   return (
     <div className="sheet-page">
       <TitleBlock project={project} title={title} position={position} />
+      <ChecksSummary summary={checks} onJump={onJump} anchorFor={anchorFor} />
       {lines.map((line, index) =>
-        index === titleLine ? null : <Rendered key={index} line={line} />,
+        index === titleLine ? null : (
+          <Rendered
+            key={index}
+            line={line}
+            figures={sheet.figures}
+            anchor={line.kind === 'check' ? anchorFor(index) : undefined}
+          />
+        ),
       )}
+      {/* Print only: which build produced this, and what it is and is not.
+          A calculation that goes into a submission has to say both. */}
+      <p className="sheet-foot">
+        {DISCLAIMER} {buildStamp()}
+      </p>
     </div>
   )
 }
@@ -268,7 +406,7 @@ function SheetDocument({
  * are only ever handed to Paged.js: browsers cannot put a counter in an @page
  * margin box themselves, which is the whole reason this path exists.
  */
-const PAGE_CSS = `
+const pageCss = (): string => `
 @page {
   size: A4;
   margin: 16mm 15mm 18mm;
@@ -277,6 +415,12 @@ const PAGE_CSS = `
     font: 400 8.5pt ui-sans-serif, system-ui, sans-serif;
     color: #6b6b66;
     padding-bottom: 3mm;
+  }
+  @bottom-left {
+    content: ${JSON.stringify(buildStamp())};
+    font: 400 7.5pt ui-sans-serif, system-ui, sans-serif;
+    color: #8a8a84;
+    padding-top: 3mm;
   }
   @bottom-right {
     content: "Page " counter(page) " of " counter(pages);
@@ -293,9 +437,11 @@ const PAGE_CSS = `
 /* Nothing should be split down the middle of a formula or a verdict. */
 .calc-block, .check, .sheet-table tr, .katex-display { break-inside: avoid; }
 .title-block { break-after: avoid; }
+.checks-summary { break-inside: avoid; }
+.sheet-figure { break-inside: avoid; }
 `
 
-type Panel = 'none' | 'meta' | 'settings' | 'profile'
+type Panel = 'none' | 'meta' | 'settings' | 'profile' | 'share' | 'history' | 'feedback'
 
 /** "Peo Nilsson" -> "PN", "Peo" -> "P", nothing -> a neutral mark. */
 const initials = (name: string): string => {
@@ -305,6 +451,85 @@ const initials = (name: string): string => {
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join('')
+}
+
+/**
+ * A calculation someone sent you.
+ *
+ * The whole sheet arrives in the link's hash, so there is nothing to fetch and
+ * nobody to ask. It opens read-only on purpose: what is on screen is exactly
+ * what the sender had, and editing it should be a decision — "make a copy" —
+ * rather than something that happens by typing.
+ */
+function SharedView({
+  shared,
+  precision,
+  mode,
+  onCopy,
+}: {
+  shared: SharedSheet
+  precision: number
+  mode: ToleranceMode
+  onCopy: () => void
+}) {
+  const lines = useMemo(
+    () => evaluateSheet(shared.source, { precision, mode, libraries: shared.libraries ?? {} }),
+    [shared.source, precision, mode, shared.libraries],
+  )
+  const sheet: Sheet = {
+    id: 'shared',
+    name: shared.name,
+    source: shared.source,
+    figures: shared.figures,
+  }
+  const project: Project = {
+    id: 'shared',
+    name: shared.name,
+    meta: emptyMeta(),
+    sheets: [sheet],
+  }
+
+  return (
+    <div className="app shared">
+      <div className="shared-bar no-print">
+        <span>
+          <strong>Shared calculation.</strong> It came with the link — nothing was fetched from a
+          server, and nothing you do here is sent anywhere.
+        </span>
+        <div className="shared-actions">
+          <button className="primary" onClick={onCopy}>
+            Make a copy to edit
+          </button>
+          <a className="toolbar-link" href="/app">
+            Open my sheets
+          </a>
+        </div>
+      </div>
+
+      <div className="editor-pane">
+        <div className="toolbar">
+          <span className="sheet-name static">{shared.name}</span>
+          <div className="toolbar-actions">
+            <a className="toolbar-link" href="/docs" target="_blank" rel="noreferrer">
+              What is this?
+            </a>
+          </div>
+        </div>
+        <Editor value={shared.source} results={lines} onChange={() => {}} readOnly />
+      </div>
+
+      <div className="output-pane">
+        <SheetDocument
+          sheet={sheet}
+          project={project}
+          precision={precision}
+          mode={mode}
+          libraries={{}}
+          lines={lines}
+        />
+      </div>
+    </div>
+  )
 }
 
 export default function App() {
@@ -320,6 +545,15 @@ export default function App() {
   })
   const [diskSavedAt, setDiskSavedAt] = useState<number | null>(null)
   const [paged, setPaged] = useState<'off' | 'working' | 'on' | 'failed'>('off')
+  const [shared, setShared] = useState<SharedSheet | null>(null)
+  const [link, setLink] = useState<{ url: string; copied: boolean } | null>(null)
+  const [feedback, setFeedback] = useState('')
+  const [cold, setCold] = useState<ColdRun | null>(null)
+  const [counting, setCounting] = useState(!optedOut())
+  const [compare, setCompare] = useState<string | null>(null)
+  const [figureError, setFigureError] = useState<string | null>(null)
+  const editorRef = useRef<EditorView | null>(null)
+  const figureInput = useRef<HTMLInputElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   const pagedRef = useRef<HTMLDivElement>(null)
   const backupInput = useRef<HTMLInputElement>(null)
@@ -329,6 +563,33 @@ export default function App() {
     const result = saveStore(store)
     setSaveFailure(result.ok ? null : result.reason)
   }, [store])
+
+  // One pageview per load, carrying nothing but a four-word return bucket.
+  useEffect(() => {
+    start()
+  }, [])
+
+  /**
+   * A shared link opens read-only. The hash is left in the address on purpose:
+   * the link *is* the document, so reloading has to give the same thing back,
+   * and nothing about it ever reaches a server.
+   */
+  useEffect(() => {
+    let cancelled = false
+    const read = () => {
+      void sheetFromLocation().then((found) => {
+        if (cancelled) return
+        setShared(found)
+        if (found) track('share opened')
+      })
+    }
+    read()
+    window.addEventListener('hashchange', read)
+    return () => {
+      cancelled = true
+      window.removeEventListener('hashchange', read)
+    }
+  }, [])
 
   // A half-finished confirmation should not linger.
   useEffect(() => {
@@ -418,6 +679,24 @@ export default function App() {
     else root.setAttribute('data-theme', store.settings.theme)
   }, [store.settings.theme])
 
+  /**
+   * Take a snapshot when a sheet has been changing for a while without one.
+   *
+   * Nobody remembers to press "save revision" before the edit they regret, so
+   * the useful history is the one taken automatically. The interval is long
+   * enough that a working session leaves a handful of entries rather than a
+   * hundred.
+   */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStore((current) => {
+        const sheet = activeSheet(current)
+        return dueForSnapshot(sheet) ? snapshotSheet(current, sheet.id, '', true) : current
+      })
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [])
+
   const project = activeProject(store)
   const sheet = activeSheet(store)
 
@@ -465,6 +744,7 @@ export default function App() {
 
   const addSheet = (name?: string, source = '# New calculation\n\n') => {
     const id = newId()
+    track('sheet created')
     setStore((current) => ({
       ...current,
       activeSheetId: id,
@@ -544,6 +824,154 @@ export default function App() {
   }
 
   const reorder = (offset: number) => setStore((current) => moveSheet(current, sheet.id, offset))
+
+  /**
+   * Put a line where the cursor is, rather than at the end of the sheet.
+   *
+   * A figure belongs at the point in the working it illustrates, and asking
+   * someone to cut and paste the line they were just given is the kind of
+   * small rudeness that adds up.
+   */
+  const insertLine = (text: string) => {
+    const view = editorRef.current
+    if (!view) {
+      patchSheet({ source: `${sheet.source.replace(/\n*$/, '')}\n${text}\n` })
+      return
+    }
+    const line = view.state.doc.lineAt(view.state.selection.main.head)
+    const at = line.to
+    view.dispatch({
+      changes: { from: at, insert: `\n${text}` },
+      selection: { anchor: at + text.length + 1 },
+    })
+    view.focus()
+  }
+
+  const addFigure = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setFigureError(null)
+    try {
+      const image = await prepareImage(file)
+      if (image.bytes > LARGE_FIGURE) {
+        setFigureError(
+          `That image is ${humanSize(image.bytes)} even after resizing. It will work, but a few ` +
+            'more like it will fill this browser\u2019s storage — keep a backup.',
+        )
+      }
+      const id = figureId(file.name, Object.keys(sheet.figures ?? {}))
+      const caption = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ')
+      patchSheet({ figures: { ...(sheet.figures ?? {}), [id]: image.dataUrl } })
+      insertLine(`figure ${id} "${caption}"`)
+      track('figure added')
+    } catch (error) {
+      setFigureError(error instanceof Error ? error.message : 'That image could not be read.')
+    }
+  }
+
+  /**
+   * Build the link, then put it on the clipboard.
+   *
+   * Compressing is asynchronous, so the URL is shown as well as copied — a
+   * clipboard write can be refused by the browser and a button that silently
+   * did nothing would be worse than no button.
+   */
+  const makeShareLink = async () => {
+    const figures = Object.fromEntries(
+      referencedFigures(sheet.source)
+        .filter((id) => sheet.figures?.[id])
+        .map((id) => [id, sheet.figures![id]]),
+    )
+    // Everything the sheet imports goes with it. A shared sheet whose first
+    // line is `import "Loads"` would otherwise arrive with every number
+    // undefined — the sheet that was shared, and of no use to anyone.
+    const carried = Object.fromEntries(
+      importedNames(sheet.source)
+        .map((name) => [name, libraries[name]])
+        .filter(([, source]) => typeof source === 'string'),
+    ) as Record<string, string>
+
+    const url = await shareLink({
+      name: sheet.name,
+      source: sheet.source,
+      figures: Object.keys(figures).length ? figures : undefined,
+      libraries: Object.keys(carried).length ? carried : undefined,
+    })
+    let copied = false
+    try {
+      await navigator.clipboard.writeText(url)
+      copied = true
+    } catch {
+      /* the address is shown below either way */
+    }
+    setLink({ url, copied })
+    track('share created', { long: url.length > LONG_LINK })
+  }
+
+  /** A shared sheet becomes yours: copied in, hash cleared, straight to editing. */
+  const copyShared = () => {
+    if (!shared) return
+    const id = newId()
+    setStore((current) => {
+      const target = activeProject(current)
+      return {
+        ...current,
+        activeProjectId: target.id,
+        activeSheetId: id,
+        projects: current.projects.map((candidate) =>
+          candidate.id === target.id
+            ? {
+                ...candidate,
+                sheets: [
+                  ...candidate.sheets,
+                  { id, name: shared.name, source: shared.source, figures: shared.figures },
+                ],
+              }
+            : candidate,
+        ),
+      }
+    })
+    window.history.replaceState(null, '', window.location.pathname)
+    setShared(null)
+    track('sheet created', { from: 'share' })
+  }
+
+  const saveRevision = () => {
+    setStore((current) => snapshotSheet(current, sheet.id, 'Saved by hand'))
+  }
+
+  const putBack = (revisionId: string) => {
+    setStore((current) => restoreRevision(current, sheet.id, revisionId))
+    setCompare(null)
+    track('revision restored')
+  }
+
+  /**
+   * Run the sheet again from nothing and say whether the cached answer held.
+   *
+   * The incremental cache is what keeps a long sheet responsive and it is also
+   * the one place the app could quietly show a stale number. An engineer
+   * should be able to prove it did not, without taking our word for it.
+   */
+  const recalculate = () => {
+    setCold(
+      recomputeCold(sheet.source, {
+        precision: store.precision,
+        mode: store.mode,
+        libraries,
+      }),
+    )
+    track('recalculated')
+  }
+
+  const sendFeedback = (where: 'github' | 'email') => {
+    const text = feedback.trim()
+    if (!text) return
+    window.open(where === 'github' ? issueUrl(text) : mailtoUrl(text), '_blank', 'noreferrer')
+    setFeedback('')
+    track('feedback opened', { to: where })
+  }
 
   const moveToProject = (targetId: string) =>
     setStore((current) => moveSheetToProject(current, sheet.id, targetId))
@@ -666,6 +1094,35 @@ export default function App() {
   )
 
   /**
+   * Every sheet in the project, evaluated once.
+   *
+   * The package summary needs all of them and so does the package preview, so
+   * doing it here means each sheet is worked out once rather than twice.
+   */
+  const packageLines = useMemo(() => {
+    if (!printingProject) return null
+    return project.sheets.map((candidate) =>
+      evaluateSheet(candidate.source, {
+        precision: store.precision,
+        mode: store.mode,
+        libraries: Object.fromEntries(
+          project.sheets
+            .filter((other) => other.id !== candidate.id)
+            .map((other) => [other.name, other.source]),
+        ),
+      }),
+    )
+  }, [printingProject, project.sheets, store.precision, store.mode])
+
+  const packageChecks = useMemo(() => {
+    if (!packageLines) return null
+    return project.sheets.map((candidate, index) => ({
+      sheet: candidate,
+      summary: summariseChecks(candidate.source, packageLines[index]),
+    }))
+  }, [packageLines, project.sheets])
+
+  /**
    * Show the whole package as one document and let the user look at it before
    * printing. An explicit mode beats printing straight away: they get to check
    * the order and the title blocks, and there is no timing to get wrong.
@@ -691,7 +1148,7 @@ export default function App() {
       const { Previewer } = await import('pagedjs')
       const target = pagedRef.current!
       target.innerHTML = ''
-      const url = URL.createObjectURL(new Blob([PAGE_CSS], { type: 'text/css' }))
+      const url = URL.createObjectURL(new Blob([pageCss()], { type: 'text/css' }))
       try {
         await new Previewer().preview(
           [...pages].map((page) => page.outerHTML).join(''),
@@ -761,6 +1218,14 @@ export default function App() {
         case 'h':
           window.open('/docs', '_blank', 'noreferrer')
           break
+        case 's':
+          setLink(null)
+          toggle('share')
+          break
+        case 'r':
+          setCompare(null)
+          toggle('history')
+          break
         case ',':
           toggle('settings')
           break
@@ -776,6 +1241,33 @@ export default function App() {
 
   const duplicates = duplicateNames(project)
   const backupAge = backupAgeDays(store)
+  const sheetChecks = useMemo(
+    () => summariseChecks(deferredSource, lines),
+    [deferredSource, lines],
+  )
+  const revisions = sheet.revisions ?? []
+
+  /**
+   * "Somebody wrote something real in it" is the one signal worth having, and
+   * twenty lines is roughly where a trial becomes a calculation. Counted once
+   * per sheet, ever, and carrying nothing but the fact that it happened.
+   */
+  useEffect(() => {
+    if (sheet.source.split('\n').filter((text) => text.trim()).length >= 20) {
+      trackOnce(`long:${sheet.id}`, 'sheet substantial')
+    }
+  }, [sheet.id, sheet.source])
+
+  if (shared) {
+    return (
+      <SharedView
+        shared={shared}
+        precision={store.precision}
+        mode={store.mode}
+        onCopy={copyShared}
+      />
+    )
+  }
 
   return (
     <div className="app">
@@ -806,7 +1298,10 @@ export default function App() {
 
       <aside className="sheets">
         <div className="sheets-head">
-          <span className="brand">Longhand</span>
+          <a className="brand" href="/" title="Longhand">
+            <Mark size={17} />
+            Longhand
+          </a>
           <button className="icon" onClick={addProject} title="New project">
             +
           </button>
@@ -899,6 +1394,16 @@ export default function App() {
             onChange={(event) => patchSheet({ name: event.target.value })}
             aria-label="Sheet name"
           />
+          {/* The verdict, where the writing happens. A check that has just
+              stopped holding should not wait to be noticed on the right. */}
+          {sheetChecks.checks.length > 0 && (
+            <span
+              className={sheetChecks.failed ? 'sheet-verdict fail' : 'sheet-verdict pass'}
+              title={verdictLine(sheetChecks)}
+            >
+              {sheetChecks.failed ? `${sheetChecks.failed} NOT OK` : 'All OK'}
+            </span>
+          )}
           <div className="toolbar-actions">
             <button
               className={panel === 'meta' ? 'on' : ''}
@@ -912,14 +1417,47 @@ export default function App() {
             >
               Settings
             </button>
+            <button
+              className={panel === 'share' ? 'on' : ''}
+              onClick={() => {
+                setLink(null)
+                setPanel((current) => (current === 'share' ? 'none' : 'share'))
+              }}
+            >
+              Share
+            </button>
+            <button
+              className={panel === 'history' ? 'on' : ''}
+              onClick={() => {
+                setCompare(null)
+                setPanel((current) => (current === 'history' ? 'none' : 'history'))
+              }}
+            >
+              History
+            </button>
+            <button onClick={() => figureInput.current?.click()}>Figure</button>
             <a className="toolbar-link" href="/docs" target="_blank" rel="noreferrer">
               Help
             </a>
             <button onClick={() => fileInput.current?.click()}>Open</button>
             <button onClick={save}>Save</button>
-            <button onClick={() => window.print()}>Print</button>
+            <button
+              onClick={() => {
+                track('sheet printed')
+                window.print()
+              }}
+            >
+              Print
+            </button>
           </div>
           <input ref={fileInput} type="file" accept=".calc,.txt,text/plain" onChange={open} hidden />
+          <input
+            ref={figureInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            onChange={addFigure}
+            hidden
+          />
         </div>
 
         {panel === 'meta' && (
@@ -1015,6 +1553,185 @@ export default function App() {
                     : 'Delete project'}
                 </button>
               </div>
+            </section>
+          </div>
+        )}
+
+        {panel === 'share' && (
+          <div className="panel">
+            <section>
+              <h3>Share this sheet</h3>
+              <p className="hint">
+                The whole calculation is compressed into the link itself, so it opens without an
+                account and without a server. Nothing is uploaded — the words travel in the
+                address, which means anyone with the link can read the sheet, and nobody without
+                it can.
+              </p>
+              <div className="settings-buttons">
+                <button className="primary" onClick={makeShareLink}>
+                  {link ? 'Make the link again' : 'Copy a link to this sheet'}
+                </button>
+              </div>
+
+              {link && (
+                <>
+                  <p className={link.copied ? 'hint' : 'warning'}>
+                    {link.copied
+                      ? 'Copied to the clipboard.'
+                      : 'This browser would not let Longhand use the clipboard — copy it from here.'}
+                  </p>
+                  <textarea
+                    className="link-box"
+                    readOnly
+                    rows={3}
+                    value={link.url}
+                    onFocus={(event) => event.target.select()}
+                    aria-label="Share link"
+                  />
+                  <p className="hint">{link.url.length.toLocaleString()} characters.</p>
+                  {link.url.length > LONG_LINK && (
+                    <p className="warning">
+                      That is long enough that some mail clients will wrap it and break it. Send
+                      it in something that treats it as one link, or send the .calc file instead.
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+
+            <section>
+              <h3>What the reader gets</h3>
+              <p className="hint">
+                The sheet opens read-only with a “make a copy” button, showing the same three
+                stages you see here, plus any figures on it. They do not get your title block or
+                your project — only this one calculation, as it stands right now. A link is a
+                snapshot: changing the sheet afterwards does not change what an already-sent link
+                opens.
+              </p>
+              {importedNames(sheet.source).length > 0 && (
+                <p className="hint">
+                  This sheet imports{' '}
+                  {importedNames(sheet.source)
+                    .map((name) => `"${name}"`)
+                    .join(', ')}
+                  , so {importedNames(sheet.source).length === 1 ? 'that sheet goes' : 'those sheets go'}{' '}
+                  in the link too — otherwise it would arrive with every number undefined. Check
+                  you are happy to send {importedNames(sheet.source).length === 1 ? 'it' : 'them'}.
+                </p>
+              )}
+            </section>
+          </div>
+        )}
+
+        {panel === 'history' && (
+          <div className="panel">
+            <section>
+              <h3>History</h3>
+              <p className="hint">
+                A snapshot is taken while you work, and you can take one yourself before a change
+                you might want to undo. Pick one to see what changed since.
+              </p>
+              <div className="settings-buttons">
+                <button onClick={saveRevision}>Save a revision now</button>
+              </div>
+
+              {revisions.length === 0 ? (
+                <p className="hint">
+                  Nothing yet. The first snapshot is taken a few minutes into editing.
+                </p>
+              ) : (
+                <ul className="revisions">
+                  {[...revisions].reverse().map((revision: Revision) => {
+                    const change = diffLines(revision.source, sheet.source)
+                    const open = compare === revision.id
+                    return (
+                      <li key={revision.id} className={open ? 'open' : ''}>
+                        <button
+                          className="revision-head"
+                          onClick={() => setCompare(open ? null : revision.id)}
+                        >
+                          <span className="when">
+                            {new Date(revision.at).toLocaleString('sv-SE').slice(0, 16)}
+                          </span>
+                          <span className="what">{revision.label || 'While editing'}</span>
+                          <span className="delta">{describeDiff(change)}</span>
+                        </button>
+                        {open && (
+                          <div className="revision-body">
+                            {change.identical ? (
+                              <p className="hint">This is the sheet exactly as it stands now.</p>
+                            ) : (
+                              <pre className="diff">
+                                {withContext(change).map((row, index) => (
+                                  <div key={index} className={`row ${row.kind}`}>
+                                    <span className="sign">
+                                      {row.kind === 'added' ? '+' : row.kind === 'removed' ? '−' : ' '}
+                                    </span>
+                                    {row.text || ' '}
+                                  </div>
+                                ))}
+                              </pre>
+                            )}
+                            <div className="settings-buttons">
+                              <button onClick={() => putBack(revision.id)} disabled={change.identical}>
+                                Put this version back
+                              </button>
+                              <button
+                                onClick={() =>
+                                  setStore((current) =>
+                                    deleteRevision(current, sheet.id, revision.id),
+                                  )
+                                }
+                              >
+                                Forget it
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              <p className="hint">
+                Restoring keeps where you are now as its own snapshot first, so looking through
+                history can never be the thing that loses work.
+              </p>
+            </section>
+          </div>
+        )}
+
+        {panel === 'feedback' && (
+          <div className="panel">
+            <section>
+              <h3>What is missing?</h3>
+              <p className="hint">
+                One line is enough. There is no server here, so this opens a GitHub issue or an
+                email with what you wrote in it — nothing is sent until you send it.
+              </p>
+              <textarea
+                rows={4}
+                value={feedback}
+                placeholder="The thing I wanted to write and could not…"
+                onChange={(event) => setFeedback(event.target.value)}
+                aria-label="What is missing?"
+              />
+              <div className="settings-buttons">
+                <button
+                  className="primary"
+                  onClick={() => sendFeedback('github')}
+                  disabled={!feedback.trim()}
+                >
+                  Open a GitHub issue
+                </button>
+                <button onClick={() => sendFeedback('email')} disabled={!feedback.trim()}>
+                  Send it by email
+                </button>
+              </div>
+              <p className="hint">
+                Your calculation is not attached to either. If the problem is a sheet, say so and
+                paste the lines you are happy to share.
+              </p>
             </section>
           </div>
         )}
@@ -1119,6 +1836,72 @@ export default function App() {
               )}
             </section>
 
+            <section>
+              <h3>Trust</h3>
+              <p className="hint">
+                Longhand reuses everything above the first line you edited, which is what keeps a
+                long sheet responsive. This runs the sheet again from nothing and compares the
+                two, so you never have to take that on faith.
+              </p>
+              <div className="settings-buttons">
+                <button onClick={recalculate}>Recalculate from scratch</button>
+              </div>
+              {cold && (
+                <p className={cold.equal ? 'hint' : 'warning'}>
+                  {cold.equal ? (
+                    <>
+                      All {cold.lines} lines identical to the cached run, worked out again in{' '}
+                      {cold.milliseconds} ms.
+                    </>
+                  ) : (
+                    <>
+                      Line {cold.firstDifference} differs between the cached run and a fresh one.
+                      This is a bug in Longhand — please report it, and use the fresh values now
+                      on screen.
+                    </>
+                  )}
+                </p>
+              )}
+              <p className="hint">{buildStamp()}</p>
+            </section>
+
+            <section>
+              <h3>Figures</h3>
+              <p className="hint">
+                {Object.keys(sheet.figures ?? {}).length === 0
+                  ? 'No images on this sheet. “Figure” in the toolbar attaches one at the cursor.'
+                  : `${Object.keys(sheet.figures ?? {}).length} image${
+                      Object.keys(sheet.figures ?? {}).length === 1 ? '' : 's'
+                    } on this sheet, about ${humanSize(figuresSize(sheet.figures))} of this browser's storage.`}
+              </p>
+              {figureError && <p className="warning">{figureError}</p>}
+            </section>
+
+            <section>
+              <h3>Counting</h3>
+              <p className="hint">
+                Longhand counts how many sheets get made and whether anyone comes back — never
+                what is in them. No cookie, no account, no identifier, and the address of a shared
+                link is never sent. Switching this off stops even that.
+              </p>
+              <label className="check-line">
+                <input
+                  type="checkbox"
+                  checked={counting}
+                  onChange={(event) => {
+                    setCounting(event.target.checked)
+                    setOptedOut(!event.target.checked)
+                  }}
+                />
+                <span>Let Longhand count anonymous usage</span>
+              </label>
+              <p className="hint">
+                <a href="/privacy" target="_blank" rel="noreferrer">
+                  What is and is not collected
+                </a>
+              </p>
+            </section>
+
             <input
               ref={backupInput}
               type="file"
@@ -1148,6 +1931,19 @@ export default function App() {
             </section>
 
             <section>
+              <h3>Say something</h3>
+              <p className="hint">
+                The fastest way to change what gets built next.
+              </p>
+              <div className="settings-buttons">
+                <button onClick={() => setPanel('feedback')}>What is missing?</button>
+                <a className="toolbar-link" href={ISSUES_URL} target="_blank" rel="noreferrer">
+                  Everything already reported
+                </a>
+              </div>
+            </section>
+
+            <section>
               <h3>Not here yet</h3>
               {/* Named honestly rather than shown as buttons that do nothing. None of
                   this is built, and none of it is needed to do a calculation. */}
@@ -1165,6 +1961,9 @@ export default function App() {
           value={sheet.source}
           results={lines}
           onChange={(source) => patchSheet({ source })}
+          onReady={(view) => {
+            editorRef.current = view
+          }}
         />
       </div>
 
@@ -1198,7 +1997,13 @@ export default function App() {
                   {paged === 'working' ? 'Paginating…' : 'Back to one long page'}
                 </button>
               )}
-              <button onClick={() => window.print()} disabled={paged === 'working'}>
+              <button
+                onClick={() => {
+                  track('package printed', { paged: paged === 'on', sheets: project.sheets.length })
+                  window.print()
+                }}
+                disabled={paged === 'working'}
+              >
                 Print package
               </button>
               <button
@@ -1218,21 +2023,74 @@ export default function App() {
         <div className="paged-output" ref={pagedRef} />
 
         {printingProject ? (
-          project.sheets.map((candidate, index) => (
-            <SheetDocument
-              key={candidate.id}
-              sheet={candidate}
-              project={project}
-              precision={store.precision}
-              mode={store.mode}
-              libraries={Object.fromEntries(
-                project.sheets
-                  .filter((other) => other.id !== candidate.id)
-                  .map((other) => [other.name, other.source]),
-              )}
-              position={`${index + 1} of ${project.sheets.length}`}
-            />
-          ))
+          <>
+            {packageChecks && packageChecks.some((entry) => entry.summary.checks.length > 0) && (
+              <div className="sheet-page">
+                <TitleBlock project={project} title={`${project.name} — checks`} />
+                {/* Every verdict in the package, on one page. It is the page a
+                    reviewer reads first and the only one some of them read. */}
+                <section className="checks-summary package-checks">
+                  <header>
+                    <h3>All checks in this package</h3>
+                    <span
+                      className={
+                        packageChecks.some((entry) => entry.summary.failed)
+                          ? 'overall fail'
+                          : 'overall pass'
+                      }
+                    >
+                      {packageChecks.reduce(
+                        (total, entry) => total + entry.summary.checks.length,
+                        0,
+                      )}{' '}
+                      checks,{' '}
+                      {packageChecks.reduce((total, entry) => total + entry.summary.failed, 0) ||
+                        'none'}{' '}
+                      not OK
+                    </span>
+                  </header>
+                  {packageChecks
+                    .filter((entry) => entry.summary.checks.length > 0)
+                    .map((entry) => (
+                      <div key={entry.sheet.id} className="package-sheet">
+                        <h4>{entry.sheet.name}</h4>
+                        <ol>
+                          {entry.summary.checks.map((check, index) => (
+                            <li key={index} className={check.pass ? 'pass' : 'fail'}>
+                              <span className="what">
+                                {check.label}
+                                {check.section && <em className="where">{check.section}</em>}
+                              </span>
+                              <span className="badge">{check.pass ? 'OK' : 'NOT OK'}</span>
+                              <span className="margin">{check.margin ?? ''}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    ))}
+                </section>
+                <p className="sheet-foot">
+                  {DISCLAIMER} {buildStamp()}
+                </p>
+              </div>
+            )}
+            {project.sheets.map((candidate, index) => (
+              <SheetDocument
+                key={candidate.id}
+                sheet={candidate}
+                project={project}
+                precision={store.precision}
+                mode={store.mode}
+                libraries={Object.fromEntries(
+                  project.sheets
+                    .filter((other) => other.id !== candidate.id)
+                    .map((other) => [other.name, other.source]),
+                )}
+                position={`${index + 1} of ${project.sheets.length}`}
+                lines={packageLines?.[index]}
+              />
+            ))}
+          </>
         ) : (
           <SheetDocument
             sheet={{ ...sheet, source: deferredSource }}
@@ -1240,6 +2098,13 @@ export default function App() {
             precision={store.precision}
             mode={store.mode}
             libraries={libraries}
+            lines={lines}
+            onJump={(index) => {
+              const target = document.getElementById(`check-${sheet.id}-${index}`)
+              target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+              target?.classList.add('flash')
+              setTimeout(() => target?.classList.remove('flash'), 1200)
+            }}
           />
         )}
       </div>

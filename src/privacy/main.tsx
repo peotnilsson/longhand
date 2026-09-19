@@ -1,12 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ErrorBoundary } from '../ErrorBoundary'
-import Docs from './Docs'
+import Privacy from './Privacy'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <Docs />
+      <Privacy />
     </ErrorBoundary>
   </StrictMode>,
 )

@@ -8,6 +8,24 @@ export interface Sheet {
   id: string
   name: string
   source: string
+  /**
+   * Images for `figure <id> "caption"` lines, by id. The words stay in the
+   * source — a sheet is text — and only the pixels live out here.
+   */
+  figures?: Record<string, string>
+  /** Snapshots, oldest first. See snapshotSheet(). */
+  revisions?: Revision[]
+}
+
+/** A sheet as it stood at one moment, so "what changed since B" can be answered. */
+export interface Revision {
+  id: string
+  /** Epoch milliseconds. */
+  at: number
+  /** What the author called it, or '' for one the app took by itself. */
+  label: string
+  source: string
+  auto: boolean
 }
 
 export interface ProjectMeta {
@@ -34,7 +52,7 @@ export interface Settings {
 }
 
 export interface Store {
-  version: 3
+  version: 4
   projects: Project[]
   activeProjectId: string
   activeSheetId: string
@@ -128,7 +146,7 @@ export function freshStore(): Store {
     sheets: [{ id: newId(), name: 'Beam check', source: EXAMPLE }],
   }
   return {
-    version: 3,
+    version: 4,
     projects: [project],
     activeProjectId: project.id,
     activeSheetId: project.sheets[0].id,
@@ -152,6 +170,39 @@ interface V2Store {
   precision?: number
   mode?: ToleranceMode
   settings?: Partial<Settings>
+}
+
+/**
+ * A figure map from storage or a file, with anything that is not an image
+ * dropped. A restored backup is untrusted input: an entry whose value is a
+ * javascript: URL would otherwise end up in an <img src>.
+ */
+const cleanFigures = (figures: unknown): Record<string, string> | undefined => {
+  if (!figures || typeof figures !== 'object') return undefined
+  const out: Record<string, string> = {}
+  for (const [id, value] of Object.entries(figures as Record<string, unknown>)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(id)) continue
+    if (typeof value === 'string' && value.startsWith('data:image/')) out[id] = value
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+const cleanRevisions = (revisions: unknown): Revision[] | undefined => {
+  if (!Array.isArray(revisions)) return undefined
+  const out = revisions
+    .filter(
+      (revision) =>
+        revision && typeof revision.source === 'string' && Number.isFinite(revision.at),
+    )
+    .map((revision) => ({
+      id: String(revision.id || newId()),
+      at: Number(revision.at),
+      label: String(revision.label ?? '').slice(0, 80),
+      source: String(revision.source),
+      auto: Boolean(revision.auto),
+    }))
+    .slice(-MAX_REVISIONS)
+  return out.length ? out : undefined
 }
 
 const isProjectStore = (raw: unknown): raw is Store =>
@@ -179,6 +230,8 @@ export function migrate(raw: unknown, legacySource?: string | null): Store {
             id: sheet.id || newId(),
             name: sheet.name || 'Sheet',
             source: sheet.source ?? '',
+            figures: cleanFigures((sheet as Sheet).figures),
+            revisions: cleanRevisions((sheet as Sheet).revisions),
           })),
       }))
       .filter((project) => project.sheets.length > 0)
@@ -191,7 +244,7 @@ export function migrate(raw: unknown, legacySource?: string | null): Store {
       active.sheets.find((candidate) => candidate.id === raw.activeSheetId) ?? active.sheets[0]
 
     return {
-      version: 3,
+      version: 4,
       projects,
       activeProjectId: active.id,
       activeSheetId: sheet.id,
@@ -222,7 +275,7 @@ export function migrate(raw: unknown, legacySource?: string | null): Store {
       sheets,
     }
     return {
-      version: 3,
+      version: 4,
       projects: [project],
       activeProjectId: project.id,
       activeSheetId:
@@ -242,7 +295,7 @@ export function migrate(raw: unknown, legacySource?: string | null): Store {
       sheets: [{ id: newId(), name: 'Calculation', source: legacySource }],
     }
     return {
-      version: 3,
+      version: 4,
       projects: [project],
       activeProjectId: project.id,
       activeSheetId: project.sheets[0].id,
@@ -414,4 +467,119 @@ export function moveSheetToProject(store: Store, sheetId: string, targetId: stri
     activeProjectId: target.id,
     activeSheetId: sheet.id,
   }
+}
+
+
+// ---------------------------------------------------------------- revisions
+
+/**
+ * How many snapshots a sheet keeps.
+ *
+ * Enough to cover a week of real work, and few enough that a project with
+ * twenty sheets does not quietly become the reason localStorage runs out. The
+ * oldest go first, which is the right way round: the useful question is what
+ * changed recently.
+ */
+export const MAX_REVISIONS = 40
+
+/** Ten minutes of editing without a snapshot is long enough to want one. */
+export const AUTO_REVISION_GAP = 10 * 60 * 1000
+
+export function newRevision(source: string, label = '', auto = false): Revision {
+  return { id: newId(), at: Date.now(), label, source, auto }
+}
+
+/**
+ * Take a snapshot of a sheet as it is now.
+ *
+ * Identical consecutive snapshots are refused: a revision list where half the
+ * entries say "no change" is a revision list nobody reads.
+ */
+export function snapshotSheet(
+  store: Store,
+  sheetId: string,
+  label = '',
+  auto = false,
+): Store {
+  const project = store.projects.find((candidate) =>
+    candidate.sheets.some((sheet) => sheet.id === sheetId),
+  )
+  if (!project) return store
+  const sheet = project.sheets.find((candidate) => candidate.id === sheetId)!
+  const revisions = sheet.revisions ?? []
+  if (revisions.at(-1)?.source === sheet.source) return store
+
+  const updated: Sheet = {
+    ...sheet,
+    revisions: [...revisions, newRevision(sheet.source, label, auto)].slice(-MAX_REVISIONS),
+  }
+  return replaceProject(store, {
+    ...project,
+    sheets: project.sheets.map((candidate) => (candidate.id === sheetId ? updated : candidate)),
+  })
+}
+
+/** Whether enough has happened since the last snapshot to be worth taking another. */
+export function dueForSnapshot(sheet: Sheet, now = Date.now()): boolean {
+  const last = sheet.revisions?.at(-1)
+  if (!last) return sheet.source.trim().length > 0
+  if (last.source === sheet.source) return false
+  return now - last.at >= AUTO_REVISION_GAP
+}
+
+/**
+ * Put an old version back, keeping the current one.
+ *
+ * Restoring takes a snapshot of where the sheet is first, so the act of
+ * looking at history can never be the thing that loses work.
+ */
+export function restoreRevision(store: Store, sheetId: string, revisionId: string): Store {
+  const project = store.projects.find((candidate) =>
+    candidate.sheets.some((sheet) => sheet.id === sheetId),
+  )
+  if (!project) return store
+  const sheet = project.sheets.find((candidate) => candidate.id === sheetId)!
+  const revision = sheet.revisions?.find((candidate) => candidate.id === revisionId)
+  if (!revision) return store
+
+  const saved = snapshotSheet(store, sheetId, 'Before restoring', true)
+  const savedProject = saved.projects.find((candidate) => candidate.id === project.id)!
+  const savedSheet = savedProject.sheets.find((candidate) => candidate.id === sheetId)!
+
+  return replaceProject(saved, {
+    ...savedProject,
+    sheets: savedProject.sheets.map((candidate) =>
+      candidate.id === sheetId ? { ...savedSheet, source: revision.source } : candidate,
+    ),
+  })
+}
+
+export function deleteRevision(store: Store, sheetId: string, revisionId: string): Store {
+  const project = store.projects.find((candidate) =>
+    candidate.sheets.some((sheet) => sheet.id === sheetId),
+  )
+  if (!project) return store
+  return replaceProject(store, {
+    ...project,
+    sheets: project.sheets.map((candidate) =>
+      candidate.id === sheetId
+        ? {
+            ...candidate,
+            revisions: (candidate.revisions ?? []).filter(
+              (revision) => revision.id !== revisionId,
+            ),
+          }
+        : candidate,
+    ),
+  })
+}
+
+/** Figure ids a sheet's source actually refers to, so orphans can be cleared out. */
+export function referencedFigures(source: string): string[] {
+  const ids: string[] = []
+  for (const line of source.split('\n')) {
+    const match = line.trim().match(/^figure\s+([A-Za-z_][A-Za-z0-9_]*)/)
+    if (match) ids.push(match[1])
+  }
+  return ids
 }

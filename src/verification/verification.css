@@ -1,0 +1,244 @@
+/**
+ * The verification page borrows the landing page's chrome and adds a list.
+ * Everything here is in service of one word per row — PASS or FAIL — so the
+ * page reads at a glance before anyone opens a case.
+ */
+
+.verification-hero {
+  text-align: left;
+  padding-bottom: 0;
+}
+
+.verification-hero h1 {
+  margin-left: 0;
+  max-width: 22ch;
+}
+
+.verification-hero .lede {
+  margin-left: 0;
+  max-width: 72ch;
+}
+
+.scoreboard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  margin: 26px 0 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--shade);
+}
+
+.scoreboard strong {
+  font-size: 17px;
+}
+
+.scoreboard span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.scoreboard.pass strong {
+  color: var(--pass);
+}
+
+.scoreboard.fail {
+  border-color: var(--error);
+}
+
+.scoreboard.fail strong {
+  color: var(--error);
+}
+
+.cases {
+  padding-top: 44px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.chip {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--ink);
+  border-color: var(--rule-strong);
+}
+
+.chip.on {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.case-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+.case-list li {
+  border-bottom: 1px solid var(--rule);
+}
+
+.case-head {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 4px;
+  text-align: left;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.case-head:hover {
+  background: var(--hover);
+}
+
+.verdict {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+li.ok .verdict {
+  color: var(--pass);
+}
+
+li.not-ok .verdict {
+  color: var(--error);
+}
+
+.case-title em {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.case-head .count {
+  font-size: 12.5px;
+  color: var(--faint);
+}
+
+.case-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 28px;
+  padding: 4px 4px 22px;
+}
+
+.case-body h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.case-sheet pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--shade);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.case-results ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.case-results li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.case-results code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.case-results .badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.case-results li.pass .badge {
+  color: var(--pass);
+  background: var(--pass-bg);
+}
+
+.case-results li.fail .badge {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.trouble {
+  margin-top: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--error);
+  background: var(--error-bg);
+  border-radius: 8px;
+}
+
+.trouble h4 {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+}
+
+.trouble p {
+  margin: 0 0 6px;
+}
+
+@media (max-width: 860px) {
+  .case-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .case-head {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .case-head .count {
+    display: none;
+  }
+}

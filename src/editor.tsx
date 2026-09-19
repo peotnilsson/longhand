@@ -242,10 +242,16 @@ export function Editor({
   value,
   results,
   onChange,
+  readOnly = false,
+  onReady,
 }: {
   value: string
   results: Line[]
   onChange: (next: string) => void
+  /** A shared link opens the sheet to be read, not edited. */
+  readOnly?: boolean
+  /** Hands the view out so the app can insert a line where the cursor is. */
+  onReady?: (view: EditorView) => void
 }) {
   const extensions = useMemo(
     () => [
@@ -269,6 +275,8 @@ export function Editor({
       value={value}
       onChange={onChange}
       extensions={extensions}
+      readOnly={readOnly}
+      onCreateEditor={(view) => onReady?.(view)}
       theme="none"
       basicSetup={{
         lineNumbers: true,

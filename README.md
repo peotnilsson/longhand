@@ -5,7 +5,8 @@ evaluates, checks that dimensions are consistent, and renders each line the way 
 writes it on paper: formula, then the numbers substituted in, then the result.
 
 Live: https://longhand-six.vercel.app — the landing page at `/`, the tool at `/app`, the
-reference at `/docs`.
+reference at `/docs`, the verification suite at `/verification`, the privacy note at
+`/privacy`.
 
 ## Run it
 
@@ -19,9 +20,13 @@ npm run build   # production build, what Vercel runs
 npm run verify  # the browser pass: build, run `npx vite preview --port 4173`, then this
 ```
 
-Three pages are built from one project: `index.html` is the landing page, `app.html` the
-tool, `docs.html` the reference. `vite.config.ts` rewrites `/app` and `/docs` in dev and
+Five pages are built from one project: `index.html` is the landing page, `app.html` the
+tool, `docs.html` the reference, `verification.html` the verification suite and
+`privacy.html` the privacy note. `vite.config.ts` rewrites the clean URLs in dev and
 preview so local URLs match what `vercel.json`'s `cleanUrls` serves in production.
+
+Every push runs the same three commands in GitHub Actions (`.github/workflows/ci.yml`):
+lint, tests, build, then the Playwright pass against a preview server.
 
 Edit the left pane; the right pane updates as you type. `Cmd/Ctrl + P` prints the sheet —
 the print stylesheet hides the editor, because a calculation sheet is a document.
@@ -207,3 +212,37 @@ loads only when that button is pressed.
 - Use it for your own coursework every week. The day you stop reaching for it, something is wrong.
 - Never build a feature you have not personally needed.
 - Show it to one engineer who is not you. Nothing here is proven until then.
+
+
+## Verification
+
+`src/verification.ts` holds problems whose answers are known before Longhand is asked —
+closed-form results and conversions that are exact by definition. Each case is an ordinary
+sheet that ends in a check, with the expected value written into it beside a note saying
+where that value came from, so "verified" means the sheet ran without errors and every
+check in it held.
+
+The suite runs twice: `src/verification.test.ts` runs it on every commit, and `/verification`
+runs it in the reader's browser on the build that served the page. A failure there is not a
+broken test — it means Longhand has started giving a different answer to a problem whose
+answer is known, which is the one class of bug this project cannot ship.
+
+## Sharing
+
+Share compresses the whole sheet — figures, and any sheets it imports — into the link's
+fragment, the part of a URL a browser never sends to a server. So a link opens with no
+account and nothing uploaded, read-only, with a button to take a copy. The cost is that the
+link carries every byte: `src/share.ts` warns past 12,000 characters, where mail clients
+start wrapping it.
+
+## Counting
+
+`src/analytics.ts` sends a handful of fixed event names with at most a few short enumerated
+labels, and it builds the payload itself rather than loading a third-party script — which is
+what guarantees a share link's fragment can never end up in it. It is off unless
+`VITE_ANALYTICS_DOMAIN` is set (see `.env.example`), honours Do Not Track and Global Privacy
+Control, and has a switch in Settings → Data.
+
+## Licence
+
+MIT — see `LICENSE`. `/privacy` states what is and is not stored, in ordinary words.

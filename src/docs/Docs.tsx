@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ENTRIES, REFERENCE, filterSections, type Entry, type Section } from '../reference'
 import { EXAMPLES } from '../examples'
+import { Mark } from '../Mark'
 import './docs.css'
 
 /**
@@ -139,10 +140,13 @@ export default function Docs() {
       <header className="docs-head">
         <div className="docs-head-inner">
           <a className="brand" href="/">
+            <Mark size={18} />
             Longhand
           </a>
           <nav>
             <a href="/app">Open the app</a>
+            <a href="/verification">Verification</a>
+            <a href="/privacy">Privacy</a>
             <a href="https://github.com/peotnilsson/longhand">Source</a>
           </nav>
         </div>

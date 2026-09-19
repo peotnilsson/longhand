@@ -1,0 +1,59 @@
+name: CI
+
+# Everything that used to be run by hand before a push, run on every push
+# instead. The Playwright pass is the expensive half and the one most likely to
+# be skipped when in a hurry, which is exactly why it belongs here.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The build stamps the commit onto every printed sheet, so the build
+          # needs to know which commit it is.
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests and the verification suite
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install a browser for the end-to-end pass
+        run: npx --yes playwright@latest install --with-deps chromium
+
+      - name: Serve the build and run the browser checks
+        run: |
+          npx vite preview --port 4173 &
+          npx --yes wait-on --timeout 60000 http://localhost:4173/
+          npm run verify
+
+      # A failed browser check is much easier to read with the screenshots it
+      # took on the way past.
+      - name: Keep the screenshots from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-screenshots
+          path: verify-*.png
+          if-no-files-found: ignore
+          retention-days: 7
