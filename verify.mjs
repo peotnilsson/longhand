@@ -7,6 +7,7 @@
  * Writes verify-light.png, verify-dark.png and verify-phone.png to look at.
  */
 import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
 
 const ok = []
@@ -127,6 +128,12 @@ process.on('uncaughtException', (error) => {
     process.exit(1)
   })()
 })
+
+/** The link the share check produced, reused by the phone check further down. */
+let sharedLink = ''
+
+/** A downloaded file's contents, as text. */
+const readDownload = async (download) => readFile(await download.path(), 'utf8')
 
 const seedWith = async (store) => {
   await page.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), store)
@@ -987,6 +994,7 @@ for (const [theme, width, height, tag] of [
   await page.click('button:has-text("Copy a link")')
   await page.waitForSelector('.link-box')
   const url = await page.$eval('.link-box', (e) => e.value)
+  sharedLink = url
   check('share: the link points at the app', url.includes('/app#s='), url.slice(0, 60))
   check('share: nothing is in the query string', !url.includes('?'), url.slice(0, 80))
   check('share: it is short enough to send', url.length < 4000, `${url.length} characters`)
@@ -1346,6 +1354,210 @@ for (const [theme, width, height, tag] of [
     JSON.parse(localStorage.getItem('longhand:store')).projects[0].sheets.at(-1))
   check('and it is blank', added.source.trim() === '# New calculation', JSON.stringify(added.source))
   await first.close()
+}
+
+// 40. find and replace, and jumping to where a name was defined
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Nav', source: '# Nav\nb = 300 mm\nh = 500 mm\nf_yd = 235 MPa\nW = b*h^2/6\nsigma = 250 kN*m/W\n' },
+  ] }], activeSheetId: 's1' })
+
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+f')
+  await page.waitForSelector('.cm-panel.cm-search')
+  check('find and replace opens in the sheet', true)
+  const replaceable = await page.$('.cm-panel.cm-search input[name="replace"]')
+  check('and it can replace, not only find', replaceable !== null)
+  await page.keyboard.press('Escape')
+
+  await page.click('button:has-text("Symbols")')
+  await page.waitForSelector('.symbols')
+  await page.click('.symbols li:has(code:text-is("sigma")) .symbol-head')
+  await page.waitForSelector('.symbol-body')
+  await page.click('.symbol-body button:has-text("Go to line")')
+  await page.waitForTimeout(250)
+  const atLine = await page.evaluate(() => {
+    const active = document.querySelector('.cm-activeLine')
+    return active ? active.textContent : ''
+  })
+  check('a symbol takes you to the line that defines it', /sigma/.test(atLine), JSON.stringify(atLine))
+
+  await page.click('button:has-text("Symbols")')
+  await page.waitForTimeout(150)
+  await page.click('button:has-text("Symbols")')
+  await page.waitForSelector('.symbols')
+  await page.click('.symbols li:has(code:text-is("W")) .symbol-head')
+  await page.waitForSelector('.symbol-body')
+  await page.click('.symbol-body .symbol-link:text-is("b")')
+  await page.waitForTimeout(250)
+  const atDependency = await page.evaluate(() =>
+    document.querySelector('.cm-activeLine')?.textContent ?? '')
+  check('and a name in its dependency list does the same',
+    /b = 300 mm/.test(atDependency), JSON.stringify(atDependency))
+  await page.click('button:has-text("Symbols")')
+}
+
+// 41. the command palette
+{
+  await seedWith(seed)
+  await page.keyboard.press('Control+k')
+  await page.waitForSelector('.commands')
+  const offered = await page.$$eval('.command-label', (els) => els.map((e) => e.textContent))
+  check('Cmd+K opens the app\'s own palette', offered.length > 8, JSON.stringify(offered.slice(0, 5)))
+  check('and it can do the things the toolbar can',
+    offered.some((t) => /Print this sheet/.test(t)) && offered.some((t) => /LaTeX/.test(t)),
+    JSON.stringify(offered.slice(0, 12)))
+
+  await page.keyboard.type('latex')
+  await page.waitForTimeout(200)
+  const narrowed = await page.$$eval('.command-label', (els) => els.map((e) => e.textContent))
+  check('typing narrows it', narrowed.length === 1 && /LaTeX/.test(narrowed[0]), JSON.stringify(narrowed))
+
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  check('and Escape closes it', (await page.$('.commands')) === null)
+
+  // Switching sheets is the thing it will be used for most.
+  await page.keyboard.press('Control+k')
+  await page.waitForSelector('.commands')
+  await page.keyboard.type('Tunnel')
+  await page.waitForTimeout(200)
+  const sheetRow = await page.$$eval('.command-group', (els) => els.map((e) => e.textContent))
+  check('sheets and projects are commands too',
+    sheetRow.some((t) => /Go to/.test(t)), JSON.stringify(sheetRow))
+  await page.keyboard.press('Escape')
+}
+
+// 42. a signature that stops applying the moment the sheet changes
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Signed', source: '# Signed\nb = 300 mm\nh = 500 mm\nW = b*h^2/6\n' },
+  ] }], activeSheetId: 's1' })
+
+  await page.click('button:has-text("Project")')
+  await page.waitForSelector('.panel')
+  await page.fill('.panel input[aria-label="Sign as"]', 'A. Nilsson')
+  await page.click('.panel button:has-text("Sign as checked")')
+  await page.waitForTimeout(400)
+  const signed = await page.$eval('.sheet-page .signature', (e) => e.textContent)
+  check('a signed sheet says who checked it', /Checked by A. Nilsson/.test(signed), signed)
+  check('and shows the fingerprint it was signed against', /signature [0-9a-f]{12}/.test(signed), signed)
+
+  await page.click('button:has-text("Project")')
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('\nx = 1 mm')
+  await page.waitForTimeout(600)
+  const stale = await page.$eval('.sheet-page .signature', (e) => e.textContent)
+  check('and an edit makes the signature say it no longer applies',
+    /no longer applies/.test(stale), stale)
+  check('the warning is part of the document, not the chrome',
+    (await page.$eval('.sheet-page .signature', (e) => getComputedStyle(e).display)) !== 'none')
+}
+
+// 43. export for somebody else's report
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Export me', source: '# Export me\nb = 300 mm\nh = 500 mm\nW = b*h^2/6\nsigma = 250 kN*m/W -> MPa\nsigma <= 235 MPa\n' },
+  ] }], activeSheetId: 's1' })
+
+  await page.click('button:has-text("Symbols")')
+  await page.waitForSelector('.panel')
+
+  const latex = page.waitForEvent('download')
+  await page.click('.panel button:has-text("Export as LaTeX")')
+  const texFile = await latex
+  const tex = await readDownload(texFile)
+  check('LaTeX export is a document that compiles on its own',
+    tex.includes('\\documentclass') && tex.includes('\\end{document}'), tex.slice(0, 40))
+  check('and carries the formulas as formulas', /\\frac|\\begin\{equation\}/.test(tex))
+  check('and the file is named after the sheet', /export-me\.tex$/.test(texFile.suggestedFilename()),
+    texFile.suggestedFilename())
+
+  const word = page.waitForEvent('download')
+  await page.click('.panel button:has-text("Export for Word")')
+  const docFile = await word
+  const doc = await readDownload(docFile)
+  check('Word export hands the maths over as maths, not a picture',
+    doc.includes('<math') && !doc.includes('<img'), doc.slice(0, 60))
+  check('and says it is a Word document', doc.includes('office:word'))
+  await page.click('button:has-text("Symbols")')
+}
+
+// 44. a spreadsheet export, dropped in
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Import', source: '# Import\n' },
+  ] }], activeSheetId: 's1' })
+
+  await page.setInputFiles('input[accept*=".csv"]', {
+    name: 'sections.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('profile,h,A\nIPE200,200 mm,2850 mm^2\nIPE300,300 mm,5380 mm^2\n'),
+  })
+  await page.waitForTimeout(700)
+  const source = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('longhand:store')).projects[0].sheets[0].source)
+  check('a CSV becomes a table block in the sheet',
+    source.includes('table sections') && source.includes('IPE300'), JSON.stringify(source.slice(0, 60)))
+  const headers = await page.$$eval('.sheet-table th', (els) => els.map((e) => e.textContent))
+  check('and it is a table the sheet actually computed',
+    headers.join(',') === 'profile,h,A', JSON.stringify(headers))
+}
+
+// 45. a wide table turns the page instead of shrinking the type
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Wide', source: [
+      '# Wide',
+      'M = 250 kN*m',
+      'table',
+      '  case | bw     | hw     | Wt = bw*hw^2/6 | st = M/Wt | ok = st <= 235 MPa | note',
+      '  A    | 300 mm | 500 mm |                |           |                    | first',
+      'end',
+      'table',
+      '  case | bw',
+      '  A    | 300 mm',
+      'end',
+    ].join('\n') },
+  ] }], activeSheetId: 's1' })
+
+  const classes = await page.$$eval('.table-scroll', (els) => els.map((e) => e.className))
+  check('a table past six columns is marked for a landscape page',
+    classes[0].includes('wide') && !classes[1].includes('wide'), JSON.stringify(classes))
+}
+
+// 46. a shared link on a phone opens the document, not the editor
+{
+  const phone = await openPage({ viewport: { width: 390, height: 844 } })
+  phone.setDefaultTimeout(45_000)
+  await phone.goto(sharedLink)
+  await phone.waitForSelector('.sheet-page')
+  await phone.waitForTimeout(400)
+
+  check('the editor is out of the way', (await phone.$('.app.shared.reading')) !== null)
+  check('and the document is what fills the screen',
+    (await phone.$eval('.editor-pane', (e) => getComputedStyle(e).display)) === 'none')
+
+  await phone.click('button:has-text("Show the working")')
+  await phone.waitForTimeout(300)
+  check('the source is one tap away for a reviewer who wants it',
+    (await phone.$eval('.editor-pane', (e) => getComputedStyle(e).display)) !== 'none')
+  await phone.close()
+}
+
+// 47. the app keeps a copy of itself
+{
+  const offline = await openPage({ viewport: { width: 1200, height: 800 } })
+  offline.setDefaultTimeout(45_000)
+  await offline.goto('http://localhost:4173/app')
+  await offline.waitForSelector('.sheet-page')
+  const registered = await offline.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration()
+    return Boolean(registration)
+  })
+  check('a service worker is registered, so the app can start without a network', registered)
+  await offline.close()
 }
 
 await browser.close()

@@ -1,5 +1,6 @@
 import type { ToleranceMode } from './engine'
 import { EXAMPLE_PROJECT, EXAMPLE_SHEETS } from './templates'
+import { cleanSignature, type Signature } from './signature'
 
 /**
  * A project is the unit engineers deliver: a set of sheets sharing one title
@@ -9,6 +10,11 @@ export interface Sheet {
   id: string
   name: string
   source: string
+  /**
+   * Who signed this exact text off as checked, if anyone. Kept on the sheet
+   * rather than the project because checking happens a sheet at a time.
+   */
+  signature?: Signature
   /**
    * Images for `figure <id> "caption"` lines, by id. The words stay in the
    * source — a sheet is text — and only the pixels live out here.
@@ -213,6 +219,7 @@ export function migrate(raw: unknown, legacySource?: string | null): Store {
             source: sheet.source ?? '',
             figures: cleanFigures((sheet as Sheet).figures),
             revisions: cleanRevisions((sheet as Sheet).revisions),
+            signature: cleanSignature((sheet as Sheet).signature),
           })),
       }))
       .filter((project) => project.sheets.length > 0)

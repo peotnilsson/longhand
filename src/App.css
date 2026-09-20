@@ -1659,3 +1659,251 @@ body {
   }
 }
 
+
+/* A name in the symbols panel is a link back to where it was defined. */
+.symbol-link,
+.jump {
+  font: inherit;
+  padding: 0;
+  color: var(--syn-variable);
+  background: none;
+  border: none;
+  border-bottom: 1px dotted currentColor;
+  cursor: pointer;
+}
+
+.jump {
+  font-size: 11px;
+}
+
+.symbol-link:hover,
+.jump:hover {
+  color: var(--ink);
+}
+
+/* Printed without Paged.js — the browser's own print — a wide table still
+   needs the room, so it gets the page to itself and the type comes down a
+   notch rather than the columns being crushed. */
+@media print {
+  .table-scroll.wide {
+    page: wide;
+    break-before: page;
+    break-after: page;
+  }
+
+  .table-scroll.wide .sheet-table {
+    font-size: 9pt;
+  }
+
+  @page wide {
+    size: A4 landscape;
+    margin: 15mm 16mm 18mm;
+  }
+}
+
+/* Dropping a CSV on the editor. The target is the editor itself, so there is
+   nothing extra on screen until a file is actually over it. */
+.drop-target {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.drop-target > .editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.drop-target.dropping::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 2px dashed var(--rule-strong);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.drop-hint {
+  position: absolute;
+  left: 50%;
+  top: 24px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.import-warning {
+  margin: 8px 10px 0;
+  font-size: 12px;
+}
+
+/* The signature line under the title block. It prints: a signature that has
+   been outrun by an edit is exactly what a filed copy has to admit to. */
+.signature {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  padding-top: 6px;
+  font-size: 11px;
+  border-top: 1px solid var(--rule);
+}
+
+.signature.valid {
+  color: var(--pass);
+}
+
+.signature.stale {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.pass-note {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--pass);
+}
+
+/* An input and its button side by side, in a panel. */
+.panel .row {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.panel .row input {
+  flex: 1;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+}
+
+/* The Cmd+K palette. It sits over everything, near the top, where a person
+   looking for an action is already looking. */
+.commands-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.commands {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: 64vh;
+  overflow: hidden;
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+}
+
+.commands-query {
+  font: inherit;
+  font-size: 15px;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+}
+
+.commands-query:focus {
+  outline: none;
+}
+
+.commands-list {
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.command {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.command.on {
+  background: var(--hover);
+}
+
+.command-group {
+  flex: none;
+  width: 92px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.command-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-hint {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.commands-empty {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Phone review mode: a shared link opens as the document, with the source
+   one tap away rather than taking half the screen. */
+.app.shared.reading {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.app.shared.reading .editor-pane {
+  display: none;
+}
+
+.source-toggle {
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .shared-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* On a phone the document is the whole point, so it gets the whole screen
+     and reads at a size somebody can actually check numbers at. */
+  .app.shared.reading .sheet-page {
+    padding: 16px 16px 64px;
+    font-size: 15px;
+  }
+}

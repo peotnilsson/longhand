@@ -1,7 +1,7 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import type { EditorView } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import {
   evaluateSheet,
   recomputeCold,
@@ -50,6 +50,17 @@ import { DISCLAIMER, buildStamp } from './build'
 import { ISSUES_URL, issueUrl, mailtoUrl, optedOut, setOptedOut, start, track, trackOnce } from './analytics'
 import { LONG_LINK, importedNames, shareLink, sheetFromLocation, type SharedSheet } from './share'
 import { describeDiff, diffLines, withContext } from './diff'
+import { toLatex, toWordHtml, type DocumentMeta } from './export'
+import { CommandPalette, type Command } from './Commands'
+import { useEvaluation } from './evaluator'
+import {
+  checkSignature,
+  shortHash,
+  sign,
+  signatureLine,
+  type Signature,
+  type SignatureState,
+} from './signature'
 import { figureId, figuresSize, humanSize, prepareImage, LARGE_FIGURE } from './figures'
 import {
   chooseExistingFile,
@@ -66,7 +77,14 @@ import {
 } from './disk'
 import './App.css'
 
-function Rendered({
+/**
+ * One line of the document.
+ *
+ * Memoised because the engine hands back the *same* line objects for
+ * everything above the first edited line, so React can skip them entirely
+ * rather than re-rendering a formula that did not change.
+ */
+const Rendered = memo(function Rendered({
   line,
   figures,
   anchor,
@@ -148,8 +166,12 @@ function Rendered({
       )
 
     case 'table':
+      // A table of eight columns is unreadable down a portrait page, and a
+      // table of eight columns is the common case — one row per load case,
+      // one column per quantity. Past the threshold the page turns instead
+      // of the text shrinking.
       return (
-        <div className="table-scroll">
+        <div className={line.headers.length >= WIDE_TABLE ? 'table-scroll wide' : 'table-scroll'}>
           <table className="sheet-table">
             <thead>
               <tr>
@@ -201,13 +223,43 @@ function Rendered({
         </div>
       )
   }
-}
+})
 
 /**
  * Table cells and tolerances are plain text, so "1.250e7 mm^3" would print
  * exactly like that. Render it the way it is written: 1.250·10⁷ mm³, with a
  * real micro sign. A leading "± " is passed through untouched.
  */
+/**
+ * Names in the symbols panel, each one a way back to where it was defined.
+ *
+ * Reading a dependency list and then hunting for the line it names is the
+ * hunting we are trying to get rid of, so the list itself is the navigation.
+ */
+function SymbolLinks({ names, onPick }: { names: string[]; onPick: (name: string) => void }) {
+  return (
+    <>
+      {names.map((name, index) => (
+        <span key={name}>
+          {index > 0 && ', '}
+          <button className="symbol-link" onClick={() => onPick(name)}>
+            {name}
+          </button>
+        </span>
+      ))}
+    </>
+  )
+}
+
+/**
+ * How many columns before a table is printed on its side.
+ *
+ * Six is where a table stops fitting the 180mm of a portrait A4 at a size
+ * anybody would read: five columns of quantities plus a label is about the
+ * width of the text column, and the next one pushes past it.
+ */
+const WIDE_TABLE = 6
+
 function Quantity({ text }: { text: string }) {
   const match = text.match(/^(±\s*)?(-?[\d.]+)(?:e([+-]?\d+))?\s*(.*)$/)
   if (!match) return <>{text}</>
@@ -233,22 +285,99 @@ function Quantity({ text }: { text: string }) {
   )
 }
 
+/**
+ * Rendered formulas, kept across renders rather than per component.
+ *
+ * KaTeX is fast for one formula and not for three hundred, and a `useMemo`
+ * inside the component only helps while that component stays mounted — every
+ * recompute builds a new line array, React rebuilds the tree, and all three
+ * hundred formulas are typeset again even though almost none of them changed.
+ * Keyed by the TeX itself, the second pass costs nothing.
+ *
+ * The cap is there so that an afternoon of editing does not accumulate every
+ * formula that ever existed; the oldest entries go first, and the worst case
+ * of a miss is what we used to do every time.
+ */
+const rendered = new Map<string, string>()
+const MAX_RENDERED = 4000
+
+function typeset(tex: string): string {
+  const hit = rendered.get(tex)
+  if (hit !== undefined) return hit
+  const html = katex.renderToString(tex, { displayMode: true, throwOnError: false })
+  if (rendered.size >= MAX_RENDERED) {
+    for (const key of [...rendered.keys()].slice(0, MAX_RENDERED / 4)) rendered.delete(key)
+  }
+  rendered.set(tex, html)
+  return html
+}
+
 function Tex({ tex, className }: { tex: string; className: string }) {
-  const html = useMemo(
-    () => katex.renderToString(tex, { displayMode: true, throwOnError: false }),
-    [tex],
+  return <div className={className} dangerouslySetInnerHTML={{ __html: typeset(tex) }} />
+}
+
+/**
+ * Whether this sheet's signature still matches what is on screen.
+ *
+ * Hashing is asynchronous because the platform's is, so the answer arrives a
+ * frame late. It starts at "unsigned", which is the safe thing to say while
+ * we do not yet know: a claim that a sheet is checked should never appear
+ * before it has been verified, even for one frame.
+ */
+function useSignatureState(source: string, signature?: Signature): SignatureState {
+  const [state, setState] = useState<SignatureState>('unsigned')
+
+  useEffect(() => {
+    let current = true
+    void checkSignature(source, signature).then((next) => {
+      if (current) setState(next)
+    })
+    return () => {
+      current = false
+    }
+  }, [source, signature])
+
+  return state
+}
+
+/**
+ * Whether the machine currently has a network.
+ *
+ * Only ever used to say something reassuring: the app does not behave
+ * differently offline, because it never needed the network to compute. Saying
+ * so out loud is the point — people assume a web app is dead without a bar of
+ * signal and close it.
+ */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine,
   )
-  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine)
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
+
+  return online
 }
 
 function TitleBlock({
   project,
   title,
   position,
+  signature,
+  signatureState,
 }: {
   project: Project
   title: string
   position?: string
+  signature?: Signature
+  signatureState?: SignatureState
 }) {
   return (
     <div className="title-block">
@@ -283,6 +412,13 @@ function TitleBlock({
           </>
         )}
       </dl>
+      {/* A signature that has been outrun by an edit has to say so on paper,
+          not only on screen — the paper is what gets filed. */}
+      {signatureState && signatureState !== 'unsigned' && (
+        <p className={signatureState === 'valid' ? 'signature valid' : 'signature stale'}>
+          {signatureLine(signatureState, signature)}
+        </p>
+      )}
     </div>
   )
 }
@@ -372,6 +508,7 @@ function SheetDocument({
   lines?: Line[]
   onJump?: (index: number) => void
 }) {
+  const signatureState = useSignatureState(sheet.source, sheet.signature)
   const own = useMemo(
     () => (given ? null : evaluateSheet(sheet.source, { precision, mode, libraries })),
     [given, sheet.source, precision, mode, libraries],
@@ -393,7 +530,13 @@ function SheetDocument({
       {/* A draft and an issued calculation look identical on paper otherwise,
           which is how a draft ends up in a submission. */}
       {project.meta.status !== 'issued' && <div className="watermark" aria-hidden="true">PRELIMINARY</div>}
-      <TitleBlock project={project} title={title} position={position} />
+      <TitleBlock
+        project={project}
+        title={title}
+        position={position}
+        signature={sheet.signature}
+        signatureState={signatureState}
+      />
       <ChecksSummary summary={checks} onJump={onJump} anchorFor={anchorFor} />
       {lines.map((line, index) =>
         index === titleLine ? null : (
@@ -448,6 +591,19 @@ const pageCss = (): string => `
 .sheet-page { padding: 0; max-width: none; }
 .sheet-page + .sheet-page { break-before: page; }
 
+/* A wide table gets a page of its own, turned on its side. Named pages are
+   what the spec provides for exactly this, and Paged.js implements them. */
+@page wide {
+  size: A4 landscape;
+  margin: 15mm 16mm 18mm;
+}
+
+.table-scroll.wide {
+  page: wide;
+  break-before: page;
+  break-after: page;
+}
+
 /* Nothing should be split down the middle of a formula or a verdict. */
 .calc-block, .check, .sheet-table tr, .katex-display { break-inside: avoid; }
 .title-block { break-after: avoid; }
@@ -498,6 +654,18 @@ function SharedView({
     () => evaluateSheet(shared.source, { precision, mode, libraries: shared.libraries ?? {} }),
     [shared.source, precision, mode, shared.libraries],
   )
+  /**
+   * On a phone, a shared link opens the document, not the editor.
+   *
+   * The person following a shared link is almost always reviewing rather than
+   * writing — a colleague, a checker, a manager approving something from a
+   * train — and on a narrow screen the editor takes half the height to show
+   * source they did not ask for. The source is one tap away, because a
+   * reviewer who wants to see what was actually typed must be able to.
+   */
+  const [reading, setReading] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches,
+  )
   const sheet: Sheet = {
     id: 'shared',
     name: shared.name,
@@ -512,13 +680,16 @@ function SharedView({
   }
 
   return (
-    <div className="app shared">
+    <div className={reading ? 'app shared reading' : 'app shared'}>
       <div className="shared-bar no-print">
         <span>
           <strong>Shared calculation.</strong> It came with the link — nothing was fetched from a
           server, and nothing you do here is sent anywhere.
         </span>
         <div className="shared-actions">
+          <button className="toolbar-link source-toggle" onClick={() => setReading(!reading)}>
+            {reading ? 'Show the working' : 'Hide the working'}
+          </button>
           <button className="primary" onClick={onCopy}>
             Make a copy to edit
           </button>
@@ -577,6 +748,12 @@ export default function App() {
   const [traced, setTraced] = useState<string | null>(null)
   const editorRef = useRef<EditorView | null>(null)
   const figureInput = useRef<HTMLInputElement>(null)
+  const tableInput = useRef<HTMLInputElement>(null)
+  const [dropping, setDropping] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [signedBy, setSignedBy] = useState('')
+  const [commanding, setCommanding] = useState(false)
+  const online = useOnline()
   const outputRef = useRef<HTMLDivElement>(null)
   const pagedRef = useRef<HTMLDivElement>(null)
   const backupInput = useRef<HTMLInputElement>(null)
@@ -722,6 +899,7 @@ export default function App() {
 
   const project = activeProject(store)
   const sheet = activeSheet(store)
+  const activeSignature = useSignatureState(sheet.source, sheet.signature)
 
   // Every other sheet in the project is importable by name.
   const libraries = useMemo(() => {
@@ -873,6 +1051,94 @@ export default function App() {
     view.focus()
   }
 
+  /**
+   * Put the cursor on a line of the source and show it.
+   *
+   * "Where was f_yd defined" is the question you ask most often on a long
+   * sheet, and until now the only answer was to scroll. The symbols panel
+   * knows the line; this is what turns knowing into going.
+   */
+  const jumpToLine = (number: number) => {
+    const view = editorRef.current
+    if (!view || number < 1 || number > view.state.doc.lines) return
+    const line = view.state.doc.line(number)
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    })
+    view.focus()
+  }
+
+  /** The same, given a name rather than a line. */
+  const jumpToSymbol = (name: string) => {
+    const found = symbols.find((symbol) => symbol.name === name)
+    if (found) jumpToLine(found.line)
+  }
+
+  /**
+   * A spreadsheet export, dropped in and turned into a table block.
+   *
+   * Retyping twenty rows of section properties is the single most tedious
+   * thing about starting a sheet, and every tool an engineer already has —
+   * Excel, Sheets, a supplier's download — will give you a CSV. What lands in
+   * the sheet is an ordinary table block they can edit, not an attachment:
+   * the numbers are in the calculation where a checker can see them.
+   */
+  const importTable = async (file: File) => {
+    setImportError(null)
+    if (/\.xlsx?$/i.test(file.name)) {
+      setImportError(
+        'Excel workbooks are not readable here — the file is a zip of XML, and guessing at it ' +
+          'is how you get a table of wrong numbers. In Excel: File → Save As → CSV, then drop that in.',
+      )
+      return
+    }
+    if (file.size > 2_000_000) {
+      setImportError('That file is over 2 MB. A table that big belongs in a database, not a sheet.')
+      return
+    }
+    const text = await file.text()
+    const name = file.name
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^A-Za-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/^(\d)/, 't$1')
+    const block = tableFromPaste(text, name)
+    if (!block) {
+      setImportError(
+        `Nothing table-shaped in ${file.name} — it needs a header row and at least one row under it, ` +
+          'separated by commas, semicolons or tabs.',
+      )
+      return
+    }
+    insertLine(block.replace(/\n+$/, ''))
+    track('table imported')
+  }
+
+  const chooseTable = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file) await importTable(file)
+  }
+
+  /**
+   * Sign this sheet off as checked.
+   *
+   * What gets stored is a hash of the text as it stands, so the claim is
+   * about this exact sheet rather than about a name in a box. Edit a line
+   * afterwards and the sheet says so — on screen and on paper.
+   */
+  const signSheet = async () => {
+    const by = (signedBy || store.settings.author).trim()
+    if (!by) return
+    const signature = await sign(sheet.source, by, project.meta.revision || '')
+    patchSheet({ signature })
+    setSignedBy('')
+    track('sheet signed')
+  }
+
+  const unsignSheet = () => patchSheet({ signature: undefined })
+
   const addFigure = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -990,6 +1256,41 @@ export default function App() {
           'put | between the columns instead.',
       )
     }
+  }
+
+  /** What an appendix needs to say about where it came from. */
+  const documentMeta = (): DocumentMeta => ({
+    project: project.name,
+    client: project.meta.client,
+    author: project.meta.author,
+    checkedBy: project.meta.checkedBy,
+    revision: project.meta.revision,
+    signature: signatureLine(activeSignature, sheet.signature) || undefined,
+  })
+
+  const exportLatex = () => {
+    download(
+      toLatex(sheetTitle(sheet.source), lines, documentMeta()),
+      `${slug(sheet.name)}.tex`,
+      'application/x-tex',
+    )
+    track('exported', { to: 'latex' })
+  }
+
+  /**
+   * Word opens HTML, and reads MathML inside it as its own equations — which
+   * is what makes this an appendix somebody can correct rather than a picture
+   * of one. KaTeX already knows how to produce the MathML.
+   */
+  const exportWord = () => {
+    const mathml = (tex: string) =>
+      katex.renderToString(tex, { output: 'mathml', displayMode: true, throwOnError: false })
+    download(
+      toWordHtml(sheetTitle(sheet.source), lines, mathml, documentMeta()),
+      `${slug(sheet.name)}.doc`,
+      'application/msword',
+    )
+    track('exported', { to: 'word' })
   }
 
   const exportMarkdown = () => {
@@ -1137,24 +1438,26 @@ export default function App() {
   }
 
   /**
-   * A 600-line sheet takes about 700ms to re-evaluate when the edit is on the
-   * first line, because every line below it has to be redone. Evaluating the
-   * deferred source keeps typing at full speed: React renders the keystroke
-   * immediately and recomputes the results in a pass it is allowed to abandon
-   * when the next key arrives. The results shown are then briefly one keystroke
-   * behind, which `stale` says out loud instead of pretending otherwise.
+   * The results, worked out in a worker so that typing never waits for them.
+   *
+   * A 300-line sheet with tolerances takes most of a second to redo when the
+   * edit is near the top, because every line below it has to be redone and
+   * each one needs a symbolic derivative. `useDeferredValue` stopped React
+   * from *rendering* that work at the wrong moment but the arithmetic still
+   * ran on the thread handling keystrokes. Now it does not, and the dimming
+   * that always said "these results are a moment behind" is telling the truth
+   * rather than describing a pause.
+   *
+   * `deferredSource` stays because the render of three hundred formulas is
+   * its own cost, and it is the thing React is allowed to abandon.
    */
   const deferredSource = useDeferredValue(sheet.source)
-  const stale = deferredSource !== sheet.source
-  const lines = useMemo(
-    () =>
-      evaluateSheet(deferredSource, {
-        precision: store.precision,
-        mode: store.mode,
-        libraries,
-      }),
-    [deferredSource, store.precision, store.mode, libraries],
-  )
+  const { lines, computing } = useEvaluation(deferredSource, {
+    precision: store.precision,
+    mode: store.mode,
+    libraries,
+  })
+  const stale = computing || deferredSource !== sheet.source
 
   /**
    * Every sheet in the project, evaluated once.
@@ -1240,14 +1543,22 @@ export default function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (printingProject) setPrintingProject(false)
+        if (commanding) setCommanding(false)
+        else if (printingProject) setPrintingProject(false)
         else if (panel !== 'none') setPanel('none')
         else return
         event.preventDefault()
         return
       }
 
-      const save = (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 's'
+      const modifier = (event.metaKey || event.ctrlKey) && !event.altKey
+      if (modifier && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setCommanding((current) => !current)
+        return
+      }
+
+      const save = modifier && event.key.toLowerCase() === 's'
       if (save) {
         event.preventDefault()
         download(sheet.source, `${slug(sheet.name)}.calc`, 'text/plain')
@@ -1304,7 +1615,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [panel, printingProject, project, sheet, addSheet])
+  }, [panel, printingProject, project, sheet, addSheet, commanding])
 
   const duplicates = duplicateNames(project)
   const backupAge = backupAgeDays(store)
@@ -1336,6 +1647,137 @@ export default function App() {
       trackOnce(`long:${sheet.id}`, 'sheet substantial')
     }
   }, [sheet.id, sheet.source])
+
+  /**
+   * The command list, rebuilt when what it can do changes.
+   *
+   * Sheets come first among the groups because switching sheets is what
+   * anybody with a real project does twenty times an hour, and the rest are
+   * the toolbar and the panels — everything that is a button somewhere, so
+   * the palette never becomes the only way to do anything.
+   */
+  const commands: Command[] = [
+    ...project.sheets
+      .filter((candidate) => candidate.id !== sheet.id)
+      .map((candidate) => ({
+        id: `sheet:${candidate.id}`,
+        label: candidate.name,
+        group: 'Go to sheet',
+        hint: project.name,
+        run: () => setStore((current) => ({ ...current, activeSheetId: candidate.id })),
+      })),
+    ...store.projects
+      .filter((candidate) => candidate.id !== project.id)
+      .map((candidate) => ({
+        id: `project:${candidate.id}`,
+        label: candidate.name,
+        group: 'Go to project',
+        hint: `${candidate.sheets.length} sheet${candidate.sheets.length === 1 ? '' : 's'}`,
+        run: () =>
+          setStore((current) => ({
+            ...current,
+            activeProjectId: candidate.id,
+            activeSheetId: candidate.sheets[0].id,
+          })),
+      })),
+    { id: 'new-sheet', label: 'New sheet', group: 'Make', hint: 'Alt+N', run: () => addSheet() },
+    { id: 'new-project', label: 'New project', group: 'Make', run: addProject },
+    { id: 'duplicate', label: 'Duplicate this sheet', group: 'Make', run: duplicateSheet },
+    {
+      id: 'figure',
+      label: 'Add a figure',
+      group: 'Make',
+      run: () => figureInput.current?.click(),
+    },
+    {
+      id: 'table',
+      label: 'Import a table from a CSV',
+      group: 'Make',
+      run: () => tableInput.current?.click(),
+    },
+    {
+      id: 'print',
+      label: 'Print this sheet',
+      group: 'Send',
+      hint: 'Cmd+P',
+      run: () => {
+        track('sheet printed')
+        window.print()
+      },
+    },
+    {
+      id: 'package',
+      label: 'Print the whole project',
+      group: 'Send',
+      run: () => setPrintingProject(true),
+    },
+    {
+      id: 'share',
+      label: 'Share this sheet as a link',
+      group: 'Send',
+      hint: 'Alt+S',
+      run: () => {
+        setLink(null)
+        setPanel('share')
+      },
+    },
+    { id: 'save', label: 'Save to a file', group: 'Send', hint: 'Cmd+S', run: save },
+    { id: 'open', label: 'Open a file', group: 'Send', run: () => fileInput.current?.click() },
+    { id: 'word', label: 'Export for Word', group: 'Send', run: exportWord },
+    { id: 'latex', label: 'Export as LaTeX', group: 'Send', run: exportLatex },
+    { id: 'markdown', label: 'Export as Markdown', group: 'Send', run: exportMarkdown },
+    {
+      id: 'sign',
+      label: activeSignature === 'valid' ? 'Signature and checking' : 'Sign this sheet as checked',
+      group: 'Check',
+      run: () => setPanel('meta'),
+    },
+    { id: 'recalc', label: 'Recalculate from nothing', group: 'Check', run: recalculate },
+    {
+      id: 'symbols',
+      label: 'Symbols — every name and what depends on it',
+      group: 'Check',
+      hint: 'Alt+Y',
+      run: () => {
+        setTraced(null)
+        setPanel('symbols')
+      },
+    },
+    {
+      id: 'history',
+      label: 'History and revisions',
+      group: 'Check',
+      hint: 'Alt+R',
+      run: () => setPanel('history'),
+    },
+    {
+      id: 'meta',
+      label: 'Project settings and title block',
+      group: 'Open',
+      hint: 'Alt+P',
+      run: () => setPanel('meta'),
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      group: 'Open',
+      hint: 'Alt+,',
+      run: () => setPanel('settings'),
+    },
+    {
+      id: 'help',
+      label: 'Help and the language reference',
+      group: 'Open',
+      hint: 'Alt+H',
+      run: () => window.open('/docs', '_blank', 'noreferrer'),
+    },
+    {
+      id: 'theme',
+      label: `Switch to the ${store.settings.theme === 'dark' ? 'light' : 'dark'} theme`,
+      group: 'Open',
+      run: () => setSettings({ theme: store.settings.theme === 'dark' ? 'light' : 'dark' }),
+    },
+  ]
 
   if (shared) {
     return (
@@ -1373,6 +1815,10 @@ export default function App() {
           </span>
           <button onClick={undoDelete}>Undo</button>
         </div>
+      )}
+
+      {commanding && (
+        <CommandPalette commands={commands} onClose={() => setCommanding(false)} />
       )}
 
       <aside className="sheets">
@@ -1524,6 +1970,7 @@ export default function App() {
               Symbols
             </button>
             <button onClick={() => figureInput.current?.click()}>Figure</button>
+            <button onClick={() => tableInput.current?.click()}>Table</button>
             <a className="toolbar-link" href="/docs" target="_blank" rel="noreferrer">
               Help
             </a>
@@ -1544,6 +1991,13 @@ export default function App() {
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml"
             onChange={addFigure}
+            hidden
+          />
+          <input
+            ref={tableInput}
+            type="file"
+            accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+            onChange={chooseTable}
             hidden
           />
         </div>
@@ -1613,6 +2067,62 @@ export default function App() {
                 across every page, because a draft and an issued calculation otherwise look
                 identical on paper.
               </p>
+            </section>
+
+            <section>
+              <h3>Checked</h3>
+              {activeSignature === 'valid' && sheet.signature ? (
+                <>
+                  <p className="pass-note">
+                    <strong>{sheet.name}</strong> was checked by {sheet.signature.by} on{' '}
+                    {new Date(sheet.signature.at).toLocaleDateString('sv-SE')}
+                    {sheet.signature.revision ? `, at revision ${sheet.signature.revision}` : ''}.
+                  </p>
+                  <p className="hint">
+                    Signature <code>{shortHash(sheet.signature.hash)}</code> — a SHA-256 of the
+                    sheet's text. Anyone holding the same sheet can work it out and get the same
+                    answer.
+                  </p>
+                  <button onClick={unsignSheet}>Remove the signature</button>
+                </>
+              ) : activeSignature === 'stale' && sheet.signature ? (
+                <>
+                  <p className="warning">
+                    {sheet.signature.by} signed this sheet on{' '}
+                    {new Date(sheet.signature.at).toLocaleDateString('sv-SE')}, but it has been
+                    edited since. The signature no longer applies, and the sheet says so wherever
+                    it is printed.
+                  </p>
+                  <div className="row">
+                    <input
+                      aria-label="Sign as"
+                      value={signedBy}
+                      onChange={(event) => setSignedBy(event.target.value)}
+                      placeholder={store.settings.author || 'Your name'}
+                    />
+                    <button onClick={() => void signSheet()}>Check it again</button>
+                  </div>
+                  <button onClick={unsignSheet}>Remove the signature</button>
+                </>
+              ) : (
+                <>
+                  <p className="hint">
+                    Signing stores a fingerprint of this sheet's text next to your name. It is not
+                    proof of who you are — anyone at this browser could type any name, the way
+                    anyone with a pen could. What it rules out is the thing a pen cannot: a
+                    signature quietly outliving a change to the numbers above it.
+                  </p>
+                  <div className="row">
+                    <input
+                      aria-label="Sign as"
+                      value={signedBy}
+                      onChange={(event) => setSignedBy(event.target.value)}
+                      placeholder={store.settings.author || 'Your name'}
+                    />
+                    <button onClick={() => void signSheet()}>Sign as checked</button>
+                  </div>
+                </>
+              )}
             </section>
 
             <section>
@@ -1833,6 +2343,7 @@ export default function App() {
                         <li key={`${symbol.name}-${symbol.line}`}>
                           <button
                             className="symbol-head"
+                            onDoubleClick={() => jumpToLine(symbol.line)}
                             onClick={() => setTraced(traced === symbol.name ? null : symbol.name)}
                           >
                             <code>{symbol.name}</code>
@@ -1844,12 +2355,25 @@ export default function App() {
                           {traced === symbol.name && (
                             <div className="symbol-body">
                               <p>
+                                <button className="jump" onClick={() => jumpToLine(symbol.line)}>
+                                  Go to line {symbol.line}
+                                </button>
+                              </p>
+                              <p>
                                 <strong>Built from:</strong>{' '}
-                                {symbol.dependsOn.length ? symbol.dependsOn.join(', ') : 'nothing — it is an input'}
+                                {symbol.dependsOn.length ? (
+                                  <SymbolLinks names={symbol.dependsOn} onPick={jumpToSymbol} />
+                                ) : (
+                                  'nothing — it is an input'
+                                )}
                               </p>
                               <p>
                                 <strong>Used directly by:</strong>{' '}
-                                {symbol.usedBy.length ? symbol.usedBy.join(', ') : 'nothing'}
+                                {symbol.usedBy.length ? (
+                                  <SymbolLinks names={symbol.usedBy} onPick={jumpToSymbol} />
+                                ) : (
+                                  'nothing'
+                                )}
                               </p>
                               <p>
                                 <strong>Changing it would redo:</strong>{' '}
@@ -1883,6 +2407,8 @@ export default function App() {
               </p>
               <div className="settings-buttons">
                 <button onClick={exportMarkdown}>Export as Markdown</button>
+                <button onClick={exportWord}>Export for Word</button>
+                <button onClick={exportLatex}>Export as LaTeX</button>
                 <button onClick={pasteTable}>Paste a spreadsheet range</button>
               </div>
               {figureError && <p className="warning">{figureError}</p>}
@@ -2067,6 +2593,15 @@ export default function App() {
             </section>
 
             <section>
+              <h3>Offline</h3>
+              <p className="hint">
+                Longhand keeps a copy of itself in this browser, so it opens and computes with no
+                network at all — on a site, on a train, on a locked-down machine. Your sheets were
+                never on a server to begin with. {online ? '' : 'You are offline right now, and everything here still works.'}
+              </p>
+            </section>
+
+            <section>
               <h3>Counting</h3>
               <p className="hint">
                 Longhand counts how many sheets get made and whether anyone comes back — never
@@ -2146,14 +2681,43 @@ export default function App() {
           </div>
         )}
 
-        <Editor
-          value={sheet.source}
-          results={lines}
-          onChange={(source) => patchSheet({ source })}
-          onReady={(view) => {
-            editorRef.current = view
+        {importError && (
+          <p className="warning import-warning no-print">
+            {importError}{' '}
+            <button className="jump" onClick={() => setImportError(null)}>
+              Dismiss
+            </button>
+          </p>
+        )}
+
+        {/* Dropping a spreadsheet export on the editor is the shortest path
+            from "I have this data" to "it is in the calculation". */}
+        <div
+          className={dropping ? 'drop-target dropping' : 'drop-target'}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return
+            event.preventDefault()
+            setDropping(true)
           }}
-        />
+          onDragLeave={() => setDropping(false)}
+          onDrop={(event) => {
+            const file = event.dataTransfer.files?.[0]
+            if (!file) return
+            event.preventDefault()
+            setDropping(false)
+            void importTable(file)
+          }}
+        >
+          <Editor
+            value={sheet.source}
+            results={lines}
+            onChange={(source) => patchSheet({ source })}
+            onReady={(view) => {
+              editorRef.current = view
+            }}
+          />
+          {dropping && <div className="drop-hint">Drop a CSV to make it a table</div>}
+        </div>
       </div>
 
       <div

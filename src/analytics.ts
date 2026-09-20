@@ -48,6 +48,9 @@ export const EVENTS = [
   'feedback opened',
   'verification run',
   'palette used',
+  'table imported',
+  'sheet signed',
+  'exported',
 ] as const
 
 export type EventName = (typeof EVENTS)[number]
@@ -127,6 +130,9 @@ const PROP_KEYS = [
 ] as const
 
 const PROP_WORDS = [
+  'latex',
+  'word',
+  'markdown',
   'first',
   'week',
   'month',

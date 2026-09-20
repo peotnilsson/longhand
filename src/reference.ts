@@ -477,8 +477,16 @@ export const REFERENCE: Section[] = [
         text: 'A project is a draft until you say otherwise, and a draft prints PRELIMINARY across every page. A draft and an issued calculation otherwise look identical on paper, and that is how a draft ends up in a submission. The Project panel also takes a footer line — your firm, a job number — printed under every sheet beside the build stamp.',
       },
       {
+        heading: 'Signing a sheet off',
+        text: 'The Project panel can sign the sheet you are on as checked. What gets stored is your name and a SHA-256 fingerprint of the sheet\'s text, so the claim is about that exact text rather than about a name in a box: edit a line afterwards and the sheet says, on screen and on paper, that the signature no longer applies. It is not proof of who you are — anyone at this browser could type any name, the way anyone with a pen could. What it rules out is the one thing a pen cannot, a signature quietly outliving a change to the numbers above it.',
+      },
+      {
+        heading: 'Into somebody else\'s report',
+        text: 'A calculation is often an appendix to a report written elsewhere. Symbols → Take it elsewhere exports the sheet for Word, as LaTeX, or as Markdown, and all three carry the formulas as formulas — MathML that Word turns into its own equations, \\[ … \\] for LaTeX — so what arrives is text the receiving document can renumber and correct rather than a picture of text. The LaTeX file compiles on its own and marks the body between two comments, for lifting into an existing document.',
+      },
+      {
         heading: 'Printing',
-        text: 'Print gives you the sheet you are looking at, with the editor hidden — Cmd/Ctrl+P does the same. Project → Preview whole project shows the package as one document first, so you can check the order before committing it to paper.',
+        text: 'Print gives you the sheet you are looking at, with the editor hidden — Cmd/Ctrl+P does the same. Project → Preview whole project shows the package as one document first, so you can check the order before committing it to paper. A table of six columns or more is printed on a landscape page of its own, because the common wide table — one row per load case, one column per quantity — is unreadable squeezed into portrait.',
       },
       {
         heading: 'Real page numbers',
@@ -494,6 +502,10 @@ export const REFERENCE: Section[] = [
       {
         heading: 'In this browser, by default',
         text: 'No account, no server, nothing sent anywhere. Which also means clearing the browser clears the sheets, so there are three ways to keep a copy.',
+      },
+      {
+        heading: 'It works with no network',
+        text: 'Longhand keeps a copy of itself in the browser, so it opens and computes on a site with no coverage, on a train, or on a machine that is not allowed out to the internet. Nothing about the calculation needed a network in the first place — this only means the program does not either.',
       },
       {
         heading: 'A copy on disk',
@@ -512,8 +524,8 @@ export const REFERENCE: Section[] = [
         text: 'History keeps snapshots of the sheet you are on — one taken automatically every so often while you work, and one whenever you press Save a revision. Opening a snapshot shows a line-by-line diff against the sheet as it stands, which is how "what changed since revision B" gets answered. Restoring takes a snapshot of where you are first, so looking through history can never be the thing that loses work.',
       },
       {
-        heading: 'In from a spreadsheet, out as Markdown',
-        text: 'Symbols → Paste a spreadsheet range turns whatever is on the clipboard into a table block at the cursor: Excel and Google Sheets both copy tab-separated text, and retyping twenty rows of section properties is the most tedious thing about starting a sheet. What comes out is an ordinary table you can edit. Export as Markdown writes the sheet out for a report appendix, with the tables as Markdown tables and the queries marked.',
+        heading: 'In from a spreadsheet',
+        text: 'Three ways in, all producing an ordinary table block you can edit rather than an attachment: Symbols → Paste a spreadsheet range turns whatever is on the clipboard into one — Excel and Google Sheets both copy tab-separated text — the Table button opens a CSV, and dropping a .csv straight onto the editor does the same. Excel\'s own .xlsx is not read: save it as CSV first, because guessing at a workbook is how you get a table of wrong numbers. Retyping twenty rows of section properties was the most tedious thing about starting a sheet.',
       },
       {
         heading: 'Sharing a sheet by link',
@@ -542,6 +554,22 @@ export const REFERENCE: Section[] = [
         id: 'k-palette-key',
         code: 'Cmd/Ctrl + Enter',
         summary: 'The same palette, without typing the slash first.',
+      },
+      {
+        id: 'k-commands',
+        code: 'Cmd/Ctrl + K',
+        summary: 'Everything the app can do, searchable.',
+        detail:
+          'The other half of the slash palette: that one writes a line, this one runs the app. Switch to any sheet or project by name, print, share, export, sign, open any panel. Nothing lives only here — everything in it is a button somewhere too.',
+        keywords: ['command palette', 'actions', 'switch sheet', 'go to', 'cmd k'],
+      },
+      {
+        id: 'k-find',
+        code: 'Cmd/Ctrl + F',
+        summary: 'Find and replace inside the sheet.',
+        detail:
+          'Renaming a symbol across two hundred lines is find and replace, and until there was one the only option was to do it by eye. The Symbols panel answers the other half of the same question: click a name there to jump to the line that defines it, and the names in its dependency list jump too.',
+        keywords: ['find', 'search', 'replace', 'rename', 'jump to definition'],
       },
       { id: 'k-new', code: 'Alt + N', summary: 'New sheet in this project.' },
       { id: 'k-move', code: 'Alt + [ / ]', summary: 'Previous / next sheet.' },

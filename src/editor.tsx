@@ -18,6 +18,7 @@ import {
 } from '@codemirror/autocomplete'
 import { keymap } from '@codemirror/view'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { BUILTIN_NAMES, unitNames, type Line } from './engine'
 import { filterPalette, paletteAt } from './palette'
 import { track } from './analytics'
@@ -253,6 +254,20 @@ const completion = autocompletion({
   ],
 })
 
+/**
+ * Find and replace, with the panel at the top of the editor.
+ *
+ * "Where was `f_yd` defined" and "rename every `gamma_M0` to `gamma_M1`" are
+ * both questions you ask constantly on a long sheet and could not ask here at
+ * all. CodeMirror's own search is exactly right for it, and putting the panel
+ * at the top keeps it away from the results that run down the right.
+ */
+const findAndReplace = [
+  search({ top: true }),
+  highlightSelectionMatches(),
+  keymap.of(searchKeymap),
+]
+
 /** Ctrl/Cmd-Enter opens the palette wherever the cursor is, slash or not. */
 const paletteKeys = keymap.of([
   {
@@ -314,6 +329,21 @@ const theme = EditorView.theme({
     border: '1px solid var(--rule)',
     color: 'var(--ink)',
   },
+  '.cm-panels': { backgroundColor: 'var(--paper)', color: 'var(--ink)' },
+  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--rule)' },
+  '.cm-panel.cm-search': { padding: '6px 8px', fontSize: '12px' },
+  '.cm-panel.cm-search input, .cm-panel.cm-search button': {
+    font: 'inherit',
+    color: 'var(--ink)',
+    backgroundColor: 'var(--editor-bg)',
+    border: '1px solid var(--rule)',
+    borderRadius: '4px',
+    padding: '2px 6px',
+  },
+  '.cm-panel.cm-search label': { color: 'var(--muted)' },
+  '.cm-selectionMatch': { backgroundColor: 'var(--chip-bg)' },
+  '.cm-searchMatch': { backgroundColor: 'var(--chip-bg)', outline: '1px solid var(--rule)' },
+  '.cm-searchMatch-selected': { backgroundColor: 'var(--pass-bg)' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': {
     backgroundColor: 'var(--hover)',
     color: 'var(--ink)',
@@ -345,6 +375,7 @@ export function Editor({
       EditorView.lineWrapping,
       completion,
       paletteKeys,
+      findAndReplace,
       lintGutter(),
       errorGutter(results),
       inlineResults(results),
