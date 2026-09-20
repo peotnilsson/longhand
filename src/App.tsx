@@ -88,12 +88,18 @@ const Rendered = memo(function Rendered({
   line,
   figures,
   anchor,
+  prose,
 }: {
   line: Line
   /** Images for `figure` lines, held beside the sheet rather than in it. */
   figures?: Record<string, string>
   /** An id to jump to from the checks summary. */
   anchor?: string
+  /**
+   * For a prose line: the whole run of comment lines it belongs to, joined,
+   * or the empty string when an earlier line already printed the run.
+   */
+  prose?: string
 }) {
   switch (line.kind) {
     case 'blank':
@@ -103,7 +109,11 @@ const Rendered = memo(function Rendered({
       return <h2 className={`heading h${line.level}`}>{line.text}</h2>
 
     case 'prose':
-      return <p className="prose">{line.text}</p>
+      // A run of comment lines is one paragraph. Somebody writing three lines
+      // of reasoning wrapped them because the editor is narrow, not because
+      // they meant three paragraphs, and printing them as three left the
+      // document full of gaps that were not in the author's head.
+      return prose === '' ? null : <p className="prose">{prose ?? line.text}</p>
 
     case 'note':
       return <p className="note">{line.text}</p>
@@ -340,6 +350,63 @@ function useSignatureState(source: string, signature?: Signature): SignatureStat
   return state
 }
 
+/** ⌘ on a Mac, Ctrl everywhere else — written the way the keyboard is labelled. */
+function modifierKey(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl+'
+  return /Mac|iPhone|iPad/.test(navigator.userAgent) ? '\u2318' : 'Ctrl+'
+}
+
+/**
+ * A toolbar button that opens a short menu.
+ *
+ * The toolbar had eleven controls and wrapped onto a second row, which is the
+ * point at which a toolbar stops being a toolbar and becomes a wall. The rule
+ * for what stays out: it is used on most sheets. Everything else lives here,
+ * grouped, and in the command palette for anybody who would rather type.
+ */
+function ToolbarMenu({
+  label,
+  active,
+  children,
+}: {
+  label: string
+  /** True when one of the panels this menu owns is the one on screen. */
+  active?: boolean
+  children: (close: () => void) => React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const holder = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent) => {
+      if (!holder.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="toolbar-menu" ref={holder}>
+      <button
+        className={open || active ? 'on' : ''}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        {label} <span aria-hidden="true">▾</span>
+      </button>
+      {open && <div className="menu">{children(() => setOpen(false))}</div>}
+    </div>
+  )
+}
+
 /**
  * Whether the machine currently has a network.
  *
@@ -545,8 +612,17 @@ function SheetDocument({
             line={line}
             figures={sheet.figures}
             anchor={line.kind === 'check' ? anchorFor(index) : undefined}
+            prose={line.kind === 'prose' ? proseRun(lines, index) : undefined}
           />
         ),
+      )}
+      {/* A sheet with nothing worked out in it shows a title block and two
+          inches of white, which tells a first-time reader nothing at all. */}
+      {!lines.some((line) => line.kind === 'calc' || line.kind === 'table' || line.kind === 'check') && (
+        <p className="empty-hint no-print">
+          Nothing computed yet. Write a line like <code>b = 300 mm</code> on the left, or press{' '}
+          <kbd>/</kbd> on an empty line for the list of everything you can write.
+        </p>
       )}
       {/* Print only: which build produced this, and what it is and is not.
           A calculation that goes into a submission has to say both. */}
@@ -556,6 +632,23 @@ function SheetDocument({
       </p>
     </div>
   )
+}
+
+/**
+ * A run of consecutive comment lines, as one paragraph.
+ *
+ * Returns the joined run when this line starts it, and the empty string when
+ * an earlier line has already printed it — so the caller can keep the line
+ * array intact, which the check anchors depend on.
+ */
+function proseRun(lines: Line[], index: number): string {
+  if (lines[index - 1]?.kind === 'prose') return ''
+  const run: string[] = []
+  for (let at = index; lines[at]?.kind === 'prose'; at += 1) {
+    const line = lines[at]
+    if (line.kind === 'prose') run.push(line.text)
+  }
+  return run.join(' ')
 }
 
 /**
@@ -1921,26 +2014,33 @@ export default function App() {
           />
           {/* The verdict, where the writing happens. A check that has just
               stopped holding should not wait to be noticed on the right. */}
+          {/* Saying a check failed and making you find it are two different
+              jobs. The chip does both: it is the first thing you see and the
+              shortest way to the line it is talking about. */}
           {sheetChecks.checks.length > 0 && (
-            <span
+            <button
               className={sheetChecks.failed ? 'sheet-verdict fail' : 'sheet-verdict pass'}
-              title={verdictLine(sheetChecks)}
+              title={`${verdictLine(sheetChecks)} — click to go to it`}
+              onClick={() => {
+                const target =
+                  sheetChecks.checks.find((candidate) => !candidate.pass) ?? sheetChecks.checks[0]
+                jumpToLine(target.index + 1)
+              }}
             >
               {sheetChecks.failed ? `${sheetChecks.failed} NOT OK` : 'All OK'}
-            </span>
+            </button>
           )}
           <div className="toolbar-actions">
+            {/* Three buttons and a menu. There were eleven, which wrapped onto
+                a second row and made the most-used thing on the screen look
+                like a control panel. What stays out is what gets used on most
+                sheets; everything else is one click deeper, and everything at
+                all is a keystroke away in the command palette. */}
             <button
               className={panel === 'meta' ? 'on' : ''}
               onClick={() => setPanel((current) => (current === 'meta' ? 'none' : 'meta'))}
             >
               Project
-            </button>
-            <button
-              className={panel === 'settings' ? 'on' : ''}
-              onClick={() => setPanel((current) => (current === 'settings' ? 'none' : 'settings'))}
-            >
-              Settings
             </button>
             <button
               className={panel === 'share' ? 'on' : ''}
@@ -1952,37 +2052,91 @@ export default function App() {
               Share
             </button>
             <button
-              className={panel === 'history' ? 'on' : ''}
-              onClick={() => {
-                setCompare(null)
-                setPanel((current) => (current === 'history' ? 'none' : 'history'))
-              }}
-            >
-              History
-            </button>
-            <button
-              className={panel === 'symbols' ? 'on' : ''}
-              onClick={() => {
-                setTraced(null)
-                setPanel((current) => (current === 'symbols' ? 'none' : 'symbols'))
-              }}
-            >
-              Symbols
-            </button>
-            <button onClick={() => figureInput.current?.click()}>Figure</button>
-            <button onClick={() => tableInput.current?.click()}>Table</button>
-            <a className="toolbar-link" href="/docs" target="_blank" rel="noreferrer">
-              Help
-            </a>
-            <button onClick={() => fileInput.current?.click()}>Open</button>
-            <button onClick={save}>Save</button>
-            <button
               onClick={() => {
                 track('sheet printed')
                 window.print()
               }}
             >
               Print
+            </button>
+            <ToolbarMenu
+              label="More"
+              active={panel === 'settings' || panel === 'history' || panel === 'symbols'}
+            >
+              {(close) => (
+                <>
+                  <p className="menu-group">This sheet</p>
+                  <button
+                    onClick={() => {
+                      close()
+                      setTraced(null)
+                      setPanel('symbols')
+                    }}
+                  >
+                    Symbols and export
+                  </button>
+                  <button
+                    onClick={() => {
+                      close()
+                      setCompare(null)
+                      setPanel('history')
+                    }}
+                  >
+                    History and revisions
+                  </button>
+                  <p className="menu-group">Insert</p>
+                  <button
+                    onClick={() => {
+                      close()
+                      figureInput.current?.click()
+                    }}
+                  >
+                    A figure
+                  </button>
+                  <button
+                    onClick={() => {
+                      close()
+                      tableInput.current?.click()
+                    }}
+                  >
+                    A table from a CSV
+                  </button>
+                  <p className="menu-group">Files</p>
+                  <button
+                    onClick={() => {
+                      close()
+                      fileInput.current?.click()
+                    }}
+                  >
+                    Open a sheet
+                  </button>
+                  <button
+                    onClick={() => {
+                      close()
+                      save()
+                    }}
+                  >
+                    Save to a file
+                  </button>
+                  <p className="menu-group">App</p>
+                  <button
+                    onClick={() => {
+                      close()
+                      setPanel('settings')
+                    }}
+                  >
+                    Settings
+                  </button>
+                  <a href="/docs" target="_blank" rel="noreferrer" onClick={close}>
+                    Help and reference
+                  </a>
+                </>
+              )}
+            </ToolbarMenu>
+            {/* The palette is the answer to "where did the button go", so it
+                has to be visible rather than folklore. */}
+            <button className="kbd-hint" onClick={() => setCommanding(true)} title="Everything the app can do">
+              {modifierKey()}K
             </button>
           </div>
           <input ref={fileInput} type="file" accept=".calc,.txt,text/plain" onChange={open} hidden />
@@ -2003,7 +2157,7 @@ export default function App() {
         </div>
 
         {panel === 'meta' && (
-          <div className="panel">
+          <div className="panel" data-panel="meta">
             <section>
               <h3>Project</h3>
               <label>
@@ -2180,7 +2334,7 @@ export default function App() {
         )}
 
         {panel === 'share' && (
-          <div className="panel">
+          <div className="panel" data-panel="share">
             <section>
               <h3>Share this sheet</h3>
               <p className="hint">
@@ -2246,7 +2400,7 @@ export default function App() {
         )}
 
         {panel === 'history' && (
-          <div className="panel">
+          <div className="panel" data-panel="history">
             <section>
               <h3>History</h3>
               <p className="hint">
@@ -2324,7 +2478,7 @@ export default function App() {
         )}
 
         {panel === 'symbols' && (
-          <div className="panel">
+          <div className="panel" data-panel="symbols">
             <section>
               <h3>Symbols</h3>
               <p className="hint">
@@ -2417,7 +2571,7 @@ export default function App() {
         )}
 
         {panel === 'feedback' && (
-          <div className="panel">
+          <div className="panel" data-panel="feedback">
             <section>
               <h3>What is missing?</h3>
               <p className="hint">
@@ -2452,7 +2606,7 @@ export default function App() {
         )}
 
         {panel === 'settings' && (
-          <div className="panel settings">
+          <div className="panel settings" data-panel="settings">
             <section>
               <h3>Appearance</h3>
               <label>
@@ -2637,7 +2791,7 @@ export default function App() {
         )}
 
         {panel === 'profile' && (
-          <div className="panel">
+          <div className="panel" data-panel="profile">
             <section>
               <h3>You</h3>
               <label>

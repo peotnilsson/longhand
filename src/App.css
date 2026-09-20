@@ -1907,3 +1907,125 @@ body {
     font-size: 15px;
   }
 }
+
+/* ------------------------------------------------- the More menu */
+
+.toolbar-menu {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 210px;
+  padding: 6px;
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+}
+
+.menu button,
+.menu a {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.menu button:hover,
+.menu a:hover {
+  background: var(--hover);
+}
+
+.menu-group {
+  margin: 8px 0 2px;
+  padding: 0 8px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.menu-group:first-child {
+  margin-top: 2px;
+}
+
+/* Every control in the toolbar is the same height, so a monospace chip beside
+   a sans-serif button does not sit a pixel low. */
+.toolbar button,
+.toolbar-link,
+.toolbar-menu > button {
+  line-height: 20px;
+}
+
+/* The palette's own shortcut, shown rather than remembered. */
+.kbd-hint {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px !important;
+  color: var(--faint) !important;
+  border-color: var(--rule) !important;
+}
+
+.kbd-hint:hover {
+  color: var(--ink) !important;
+}
+
+/* With four controls the toolbar fits one row at any width worth supporting,
+   so it no longer wraps — a second row of buttons is what made it a wall. */
+.toolbar {
+  flex-wrap: nowrap;
+}
+
+.toolbar-actions {
+  flex-wrap: nowrap;
+}
+
+/* The verdict chip is a button now, and still has to look like a chip. */
+.sheet-verdict {
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.sheet-verdict:hover {
+  border-color: currentColor;
+}
+
+/* What an empty sheet says instead of nothing. */
+.empty-hint {
+  margin: 28px 0;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px dashed var(--rule-strong);
+  border-radius: 8px;
+}
+
+.empty-hint code,
+.empty-hint kbd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  padding: 1px 5px;
+  color: var(--ink);
+  background: var(--chip-bg);
+  border-radius: 4px;
+}
+
+@media (max-width: 900px) {
+  /* No keyboard, no point advertising a keystroke. */
+  .kbd-hint {
+    display: none;
+  }
+}

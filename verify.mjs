@@ -135,6 +135,33 @@ let sharedLink = ''
 /** A downloaded file's contents, as text. */
 const readDownload = async (download) => readFile(await download.path(), 'utf8')
 
+/**
+ * Panels that live under More now that the toolbar is four controls wide.
+ *
+ * The old checks clicked a toolbar button to open a panel and clicked it again
+ * to close; these keep that shape, using the panel's own name in the DOM to
+ * tell what is on screen rather than guessing.
+ */
+const openPanelName = async () =>
+  page.$eval('.panel', (element) => element.dataset.panel).catch(() => null)
+
+const togglePanel = async (name, label) => {
+  const current = await openPanelName()
+  if (current === name) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+    return
+  }
+  if (current) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+  }
+  await page.click('.toolbar-menu > button')
+  await page.waitForSelector('.menu')
+  await page.click(`.menu button:has-text("${label}")`)
+  await page.waitForTimeout(150)
+}
+
 const seedWith = async (store) => {
   await page.addInitScript((s) => localStorage.setItem('longhand:store', JSON.stringify(s)), store)
   await page.goto('http://localhost:4173/app')
@@ -162,7 +189,7 @@ check('duplicate name warning', warn.some((t) => t.includes('Beam')), JSON.strin
 await page.click('button:has-text("Project")')
 
 // 3. backup age in settings
-await page.click('button:has-text("Settings")')
+await togglePanel('settings', 'Settings')
 await page.waitForSelector('.panel')
 const settingsText = await page.$eval('.panel', (e) => e.textContent)
 check('backup age shown', /3 days/.test(settingsText), settingsText.match(/.{0,40}day.{0,20}/)?.[0] ?? 'not found')
@@ -337,11 +364,16 @@ await page.waitForSelector('.panel')
 
 // 12. Help leaves for the reference rather than opening a panel
 {
-  const help = await page.$('.toolbar-link')
+  await page.click('.toolbar-menu > button')
+  await page.waitForSelector('.menu')
+  const help = await page.$('.menu a')
   check('Help is a link to the reference',
-    (await help?.getAttribute('href')) === '/docs' && (await help?.textContent())?.trim() === 'Help',
+    (await help?.getAttribute('href')) === '/docs' &&
+      /Help/.test((await help?.textContent()) ?? ''),
     (await help?.getAttribute('href')) ?? 'no link')
   check('and there is no help panel left behind', !(await page.$('.panel.help')))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
 }
 
 // 13. the frame stays put: only the code and the document scroll
@@ -354,7 +386,7 @@ await page.waitForSelector('.panel')
     activeSheetId: 'l',
   })
   // an open panel is the case that used to push the editor off the screen
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.waitForTimeout(400)
 
   const pageScrolls = await page.evaluate(() =>
@@ -398,11 +430,14 @@ await page.waitForSelector('.panel')
       background: getComputedStyle(e).backgroundColor,
     })))
   check('the open tab stays outlined with the mouse away',
-    lit.length === 1 && lit[0].text === 'Settings' &&
+    lit.length === 1 && lit[0].text.startsWith('More') &&
       lit[0].border !== 'rgba(0, 0, 0, 0)' && lit[0].background !== 'rgba(0, 0, 0, 0)',
     JSON.stringify(lit))
-  await page.click('button:has-text("Settings")')
-  check('pressing it again puts it out', (await page.$$('.toolbar button.on')).length === 0)
+  await togglePanel('settings', 'Settings')
+  await page.waitForTimeout(150)
+  check('pressing it again puts it out', (await page.$$('.toolbar button.on')).length === 0,
+    JSON.stringify([await openPanelName(), Boolean(await page.$('.menu')),
+      await page.$$eval('.toolbar button.on', (els) => els.map((e) => [e.textContent.trim(), e.className]))]))
 }
 
 // 14. printing is not clipped by the fixed frame
@@ -528,14 +563,14 @@ await seedWith(seed)
 await seedWith(seed)
 {
   const panelText = () => page.$eval('.panel', (e) => e.textContent)
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.waitForSelector('.panel')
   await page.click('button:has-text("Keep a copy on disk")')
   await page.waitForTimeout(700)
   check('the file is connected', /Saving to verify/.test(await panelText()),
     (await panelText()).match(/Saving to \S+/)?.[0] ?? 'not saving')
 
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.click('.cm-content')
   await page.keyboard.type('\nfrom_the_test = 5 mm')
   await page.waitForTimeout(1600)
@@ -545,7 +580,7 @@ await seedWith(seed)
   await page.reload()
   await page.waitForSelector('.sheet-page')
   await page.waitForTimeout(900)
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.waitForSelector('.panel')
   check('the file is still connected after a reload', /Saving to verify/.test(await panelText()))
 
@@ -559,11 +594,11 @@ await seedWith(seed)
       throw new Error('permission withdrawn')
     }
   })
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.click('.cm-content')
   await page.keyboard.type('\nagain = 1')
   await page.waitForTimeout(1700)
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.waitForSelector('.panel')
   check('a failed write asks to reconnect', /Reconnect verify/.test(await panelText()),
     (await panelText()).match(/Reconnect \S+/)?.[0] ?? 'no reconnect')
@@ -580,7 +615,7 @@ await seedWith(seed)
   await page.waitForTimeout(300)
   check('stopping goes back to this browser only',
     /stored in this browser only/.test(await panelText()))
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
 }
 
 // 18. real page numbers
@@ -914,9 +949,12 @@ await seedWith(seed)
   check('app: the mark is in the sidebar',
     (await app.$eval('.brand svg', (e) => e.getAttribute('aria-label'))) === 'Longhand')
 
-  const help = await app.$('.toolbar-link')
+  await app.click('.toolbar-menu > button')
+  await app.waitForSelector('.menu')
+  const help = await app.$('.menu a')
   check('Help is a link to the reference',
-    (await help?.getAttribute('href')) === '/docs' && (await help?.textContent()) === 'Help')
+    (await help?.getAttribute('href')) === '/docs' &&
+      /Help/.test((await help?.textContent()) ?? ''))
   await app.close()
 }
 
@@ -1023,7 +1061,7 @@ for (const [theme, width, height, tag] of [
 // 27. history: a saved revision diffs against the sheet as it stands
 {
   await seedWith(seed)
-  await page.click('button:has-text("History")')
+  await togglePanel('history', 'History and revisions')
   await page.click('button:has-text("Save a revision now")')
   await page.waitForSelector('.revisions li')
 
@@ -1049,7 +1087,7 @@ for (const [theme, width, height, tag] of [
 // 28. recalculating from scratch agrees with the cached run
 {
   await seedWith(seed)
-  await page.click('button:has-text("Settings")')
+  await togglePanel('settings', 'Settings')
   await page.click('button:has-text("Recalculate from scratch")')
   await page.waitForTimeout(400)
   const said = await page.$eval('.panel', (e) => e.textContent)
@@ -1231,7 +1269,7 @@ for (const [theme, width, height, tag] of [
 
 // 35. the symbols panel
 {
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
   await page.waitForSelector('.symbols')
   const names = await page.$$eval('.symbols code', (els) => els.map((e) => e.textContent))
   check('symbols: every name the sheet defines', names.includes('W') && names.includes('sigma'),
@@ -1242,7 +1280,7 @@ for (const [theme, width, height, tag] of [
   const traced = (await page.$eval('.symbol-body', (e) => e.textContent)).replace(/\s+/g, ' ')
   check('symbols: it says what a change would redo', /W/.test(traced) && /sigma/.test(traced),
     traced.slice(0, 120))
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
 }
 
 // 36. a draft says so on paper and nowhere else
@@ -1370,7 +1408,7 @@ for (const [theme, width, height, tag] of [
   check('and it can replace, not only find', replaceable !== null)
   await page.keyboard.press('Escape')
 
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
   await page.waitForSelector('.symbols')
   await page.click('.symbols li:has(code:text-is("sigma")) .symbol-head')
   await page.waitForSelector('.symbol-body')
@@ -1382,9 +1420,9 @@ for (const [theme, width, height, tag] of [
   })
   check('a symbol takes you to the line that defines it', /sigma/.test(atLine), JSON.stringify(atLine))
 
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
   await page.waitForTimeout(150)
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
   await page.waitForSelector('.symbols')
   await page.click('.symbols li:has(code:text-is("W")) .symbol-head')
   await page.waitForSelector('.symbol-body')
@@ -1394,7 +1432,7 @@ for (const [theme, width, height, tag] of [
     document.querySelector('.cm-activeLine')?.textContent ?? '')
   check('and a name in its dependency list does the same',
     /b = 300 mm/.test(atDependency), JSON.stringify(atDependency))
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
 }
 
 // 41. the command palette
@@ -1461,7 +1499,7 @@ for (const [theme, width, height, tag] of [
     { id: 's1', name: 'Export me', source: '# Export me\nb = 300 mm\nh = 500 mm\nW = b*h^2/6\nsigma = 250 kN*m/W -> MPa\nsigma <= 235 MPa\n' },
   ] }], activeSheetId: 's1' })
 
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
   await page.waitForSelector('.panel')
 
   const latex = page.waitForEvent('download')
@@ -1481,7 +1519,7 @@ for (const [theme, width, height, tag] of [
   check('Word export hands the maths over as maths, not a picture',
     doc.includes('<math') && !doc.includes('<img'), doc.slice(0, 60))
   check('and says it is a Word document', doc.includes('office:word'))
-  await page.click('button:has-text("Symbols")')
+  await togglePanel('symbols', 'Symbols and export')
 }
 
 // 44. a spreadsheet export, dropped in
@@ -1558,6 +1596,70 @@ for (const [theme, width, height, tag] of [
   })
   check('a service worker is registered, so the app can start without a network', registered)
   await offline.close()
+}
+
+// 48. the toolbar is one row again
+{
+  await seedWith(seed)
+  const rows = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('.toolbar button, .toolbar a')]
+    return [...new Set(buttons.map((element) => Math.round(element.getBoundingClientRect().top)))]
+  })
+  // A pixel of rounding between a monospace chip and a sans-serif button is
+  // not a second row; forty pixels is.
+  check('the toolbar does not wrap onto a second row',
+    Math.max(...rows) - Math.min(...rows) < 8, JSON.stringify(rows))
+
+  const visible = await page.$$eval('.toolbar-actions > button, .toolbar-actions > .toolbar-menu > button',
+    (els) => els.map((e) => e.textContent.trim()))
+  check('and holds four controls, not eleven', visible.length <= 5, JSON.stringify(visible))
+
+  await page.click('.toolbar-menu > button')
+  await page.waitForSelector('.menu')
+  const inMenu = await page.$$eval('.menu button, .menu a', (els) => els.map((e) => e.textContent.trim()))
+  check('everything else is one click deeper', inMenu.length >= 7, JSON.stringify(inMenu))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(150)
+  check('and the menu closes on Escape', (await page.$('.menu')) === null)
+}
+
+// 49. the verdict chip is the shortest way to the check it is talking about
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Verdict', source: '# Verdict\na = 40 MPa\nf = 30 MPa\n// filler\n// filler\na <= f\n' },
+  ] }], activeSheetId: 's1' })
+  await page.click('.sheet-verdict')
+  await page.waitForTimeout(250)
+  const atLine = await page.evaluate(() =>
+    document.querySelector('.cm-activeLine')?.textContent ?? '')
+  check('clicking the verdict goes to the check that failed', /a <= f/.test(atLine), JSON.stringify(atLine))
+}
+
+// 50. an empty sheet says what to do next
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Empty', source: '# Empty\n\n' },
+  ] }], activeSheetId: 's1' })
+  const hint = await page.$('.empty-hint')
+  check('a blank sheet points at the palette rather than sitting there',
+    hint !== null && /press/.test(await hint.textContent()))
+
+  await page.click('.cm-content')
+  await page.keyboard.press('Control+End')
+  await page.keyboard.type('b = 300 mm')
+  await page.waitForTimeout(600)
+  check('and the hint goes the moment there is a calculation', (await page.$('.empty-hint')) === null)
+}
+
+// 51. a run of comment lines is one paragraph
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Prose', source: '# Prose\n// one line\n// and its continuation\nb = 300 mm\n// a separate note\n' },
+  ] }], activeSheetId: 's1' })
+  const paragraphs = await page.$$eval('.sheet-page .prose', (els) => els.map((e) => e.textContent))
+  check('wrapped comment lines print as one paragraph',
+    paragraphs.length === 2 && paragraphs[0] === 'one line and its continuation',
+    JSON.stringify(paragraphs))
 }
 
 await browser.close()
