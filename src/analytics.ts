@@ -131,6 +131,7 @@ const PROP_KEYS = [
 
 const PROP_WORDS = [
   'latex',
+  'pdf',
   'word',
   'markdown',
   'first',

@@ -217,6 +217,9 @@ export const toVector = (value: unknown): unknown[] =>
 /** Past this many elements a printed list stops being read and starts being skipped. */
 const SHOWN = 10
 
+/** The largest matrix written out in full rather than described. */
+const MATRIX_SHOWN = 8
+
 /**
  * A list, with the unit said once.
  *
@@ -228,9 +231,15 @@ const SHOWN = 10
 export function formatVector(values: unknown[], precision: number): string {
   if (values.length === 0) return '[]'
   if (values.some((value) => isVector(value))) {
-    return `${values.length} row${values.length === 1 ? '' : 's'} × ${
-      toVector(values[0]).length
-    } columns`
+    // A matrix small enough to read is written out, row by row, the way it
+    // is printed: [1, 2; 3, 4]. A big one is described instead, because a
+    // screen of numbers is not something anybody checks by eye.
+    const rows = values.map((row) => toVector(row))
+    const width = Math.max(...rows.map((row) => row.length))
+    if (rows.length <= MATRIX_SHOWN && width <= MATRIX_SHOWN && rows.every((row) => !row.some(isVector))) {
+      return `[${rows.map((row) => row.map((cell) => formatValue(cell, precision)).join(', ')).join('; ')}]`
+    }
+    return `${values.length} row${values.length === 1 ? '' : 's'} × ${width} columns`
   }
 
   const shown = values.length > SHOWN ? values.slice(0, SHOWN) : values

@@ -347,6 +347,34 @@ export const REFERENCE: Section[] = [
         keywords: ['integral', 'integrate', 'area under', 'derivative', 'deriv', 'slope at', 'calculus'],
       },
       {
+        id: 'ode',
+        code: "y = ode y'' - y' - 2y = x, y(0) = 2, y'(0) = 0 for x from 0 to 3",
+        summary: 'Solve a differential equation, and get the solution as a function.',
+        detail:
+          "The equation first, then one condition per derivative below its order, all at the start of the interval. The solution goes into the sheet as a function: call it, plot it, differentiate it with deriv, or check a solution worked out by hand against it. It is solved numerically — fourth-order Runge–Kutta on two thousand steps — so it works for any equation that can be solved for its highest derivative, linear or not, but gives numbers rather than a formula. Plain numbers only: divide units out first.",
+        example:
+          "y = ode y'' - y' - 2y = x, y(0) = 2, y'(0) = 0 for x from 0 to 3\nexact(x) = 3/4*exp(2*x) + exp(-x) - x/2 + 1/4\nabs(y(1) - exact(1)) <= 1e-6\n",
+        keywords: ['ode', 'differential equation', 'differentialekvation', 'initial value', 'begynnelsevärde', 'runge kutta', 'numeric'],
+      },
+      {
+        id: 'roots',
+        code: 'r = roots(1, -1, -2)',
+        summary: 'The roots of a polynomial, complex ones included.',
+        detail:
+          'Coefficients highest power first, the order the polynomial is written in: roots(1, -1, -2) for r² − r − 2. Up to a cubic. A characteristic equation with no real roots gets its complex pair, -1 + 2i and -1 − 2i, and complex numbers work in the rest of the sheet: 2 + 3i, abs, re, im, arg, conj.',
+        example: 'r = roots(1, -1, -2)\nc = roots(1, 2, 5)\nz = 2 + 3i\nm = abs(z)\n',
+        keywords: ['roots', 'rötter', 'polynomial', 'characteristic equation', 'karakteristisk', 'complex', 'komplex', 'i', 'quadratic'],
+      },
+      {
+        id: 'matrix',
+        code: 'A = [1, 2; 3, 4]',
+        summary: 'A matrix: rows separated by semicolons.',
+        detail:
+          'Printed as a matrix, not a count of its rows. det(A), inv(A), transpose(A) and A*B work as on paper, and A*[1; 1] is a matrix times a column. A system of equations in matrix form is solved with lusolve(A, b).',
+        example: 'A = [1, 2; 3, 4]\nd = det(A)\nB = inv(A)\nx = lusolve(A, [5; 6])\n',
+        keywords: ['matrix', 'matris', 'determinant', 'inverse', 'invers', 'linear algebra', 'linjär algebra', 'system', 'vector'],
+      },
+      {
         id: 'kinds',
         code: 'A(d: length) = pi*d^2/4',
         summary: 'Say what kind of quantity a function takes.',
@@ -416,6 +444,45 @@ export const REFERENCE: Section[] = [
         example: '// The characteristic equation $r^2 - r - 2 = 0$ has the roots $r = 2$ and $r = -1$.\n',
         keywords: ['inline', 'dollar', 'sentence', 'text', 'prose', '$'],
         preview: true,
+      },
+      {
+        id: 'math-parts',
+        code: 'a) Visa att …',
+        summary: 'The parts of an exercise: a), b), c).',
+        detail:
+          'A line starting with a letter and a closing bracket is a part of the exercise, printed with the letter in bold. The rest of the line is text, and takes $…$ maths like a comment does.',
+        example: "a) Visa att $y = x e^(-x)$ löser ekvationen.\nb) Bestäm den allmänna lösningen.\n",
+        keywords: ['part', 'deluppgift', 'a)', 'b)', 'exercise', 'uppgift', 'question'],
+        preview: true,
+      },
+      {
+        id: 'math-answer',
+        code: 'svar y(x) = 3/4 e^(2x) + e^(-x)',
+        summary: 'The answer, boxed.',
+        detail:
+          'svar — or answer — typesets the rest of the line like a math line and draws a box round it, which is how the result is marked at the end of a solution.',
+        example: 'svar y(x) = 3/4 e^(2x) + e^(-x) - x/2 + 1/4\n',
+        keywords: ['answer', 'svar', 'box', 'boxed', 'result', 'final'],
+        preview: true,
+      },
+      {
+        id: 'math-number',
+        code: "math #ode y'' - y' - 2y = x",
+        summary: 'Number an equation, and refer to it with @.',
+        detail:
+          'A label after math — or after align, or before the { of a system — numbers the line in the margin, in the same sequence as the calculation lines. Writing @ode in a comment then prints (1), and moving the line renumbers every reference to it.',
+        example: "math #ode y'' - y' - 2y = x\n// Den karakteristiska ekvationen till @ode är $r^2 - r - 2 = 0$.\n",
+        keywords: ['equation number', 'label', 'reference', 'ekvationsnummer', 'numbered', '@', 'tag'],
+        preview: true,
+      },
+      {
+        id: 'math-show',
+        code: 'show diff(x^2*sin(x), x)',
+        summary: 'A derivative worked out symbolically, and printed.',
+        detail:
+          'show diff(f, x) prints d/dx f = the derivative, as a formula rather than a number; diff(f, x, 2) is the second derivative. show simplify(f) and show expand(f) print a simplified or multiplied-out form. The letters are symbols: x stays x even if a line above gave it a value. Functions are written with brackets, sin(x) and ln(x), and multiplication with *.',
+        example: 'show diff(x^2*sin(x), x)\nshow diff(ln(x)/x, x)\nshow expand((x + 1)^3)\nshow simplify((x + 1)^2 - (x - 1)^2)\n',
+        keywords: ['symbolic', 'derivative', 'derivera', 'simplify', 'förenkla', 'expand', 'utveckla', 'show', 'cas'],
       },
       {
         id: 'math-logic',

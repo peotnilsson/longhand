@@ -16,7 +16,10 @@ import {
   startCompletion,
   type CompletionContext,
 } from '@codemirror/autocomplete'
-import { keymap } from '@codemirror/view'
+import { keymap, showTooltip, type Tooltip } from '@codemirror/view'
+import { StateField, type EditorState } from '@codemirror/state'
+import katex from 'katex'
+import { MathSyntaxError, mathToTex } from './engine/mathline'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { BUILTIN_NAMES, unitNames, type Line } from './engine'
@@ -268,6 +271,81 @@ const findAndReplace = [
   keymap.of(searchKeymap),
 ]
 
+
+/**
+ * The maths on the line you are writing, typeset under it as you type.
+ *
+ * A `math` line is written in a plain-text notation and read as typeset
+ * mathematics, and the gap between the two is where mistakes live: a bracket
+ * in the wrong place turns a fraction into something else entirely. Seeing
+ * the result under the cursor closes that gap without looking across to the
+ * document — and a line that does not parse says why, right there.
+ */
+function previewTex(state: EditorState): { tex?: string; error?: string; at: number } | null {
+  const head = state.selection.main.head
+  const line = state.doc.lineAt(head)
+  const text = line.text
+
+  // A whole math line, or an answer.
+  const whole = text.match(/^\s*(math|svar|answer)\b\s*:?\s*(#[A-Za-z_][A-Za-z0-9_]*\s+)?(.*)$/i)
+  if (whole && !/\{\s*$/.test(text) && whole[3].trim() && !/^=/.test(whole[3].trim())) {
+    const body = whole[3].replace(/\s*\/\/.*$/, '')
+    try {
+      const tex = mathToTex(body)
+      return { tex: /^(svar|answer)$/i.test(whole[1]) ? `\\boxed{${tex}}` : tex, at: line.from }
+    } catch (error) {
+      if (error instanceof MathSyntaxError) return { error: error.message, at: line.from }
+      return null
+    }
+  }
+
+  // $…$ in a comment, when the cursor is inside the pair.
+  if (/^\s*\/\//.test(text)) {
+    const offset = head - line.from
+    for (const match of text.matchAll(/\$([^$]+)\$/g)) {
+      const start = match.index!
+      const end = start + match[0].length
+      if (offset > start && offset < end) {
+        try {
+          return { tex: mathToTex(match[1]), at: line.from + start }
+        } catch (error) {
+          if (error instanceof MathSyntaxError) return { error: error.message, at: line.from + start }
+          return null
+        }
+      }
+    }
+  }
+  return null
+}
+
+const mathPreview = StateField.define<Tooltip | null>({
+  create: (state) => tooltipFor(state),
+  update: (value, transaction) =>
+    transaction.docChanged || transaction.selection ? tooltipFor(transaction.state) : value,
+  provide: (field) => showTooltip.from(field),
+})
+
+function tooltipFor(state: EditorState): Tooltip | null {
+  const preview = previewTex(state)
+  if (!preview) return null
+  return {
+    pos: preview.at,
+    above: false,
+    strictSide: false,
+    arrow: false,
+    create: () => {
+      const dom = document.createElement('div')
+      dom.className = preview.error ? 'cm-math-preview error' : 'cm-math-preview'
+      if (preview.error) {
+        dom.textContent = preview.error
+      } else {
+        dom.innerHTML = katex.renderToString(preview.tex!, { displayMode: false, throwOnError: false })
+      }
+      return { dom }
+    },
+  }
+}
+
 /** Ctrl/Cmd-Enter opens the palette wherever the cursor is, slash or not. */
 const paletteKeys = keymap.of([
   {
@@ -344,6 +422,13 @@ const theme = EditorView.theme({
   '.cm-selectionMatch': { backgroundColor: 'var(--chip-bg)' },
   '.cm-searchMatch': { backgroundColor: 'var(--chip-bg)', outline: '1px solid var(--rule)' },
   '.cm-searchMatch-selected': { backgroundColor: 'var(--pass-bg)' },
+  '.cm-tooltip:has(.cm-math-preview)': {
+    padding: '6px 10px',
+    borderRadius: '6px',
+    boxShadow: '0 6px 18px rgba(0, 0, 0, 0.08)',
+  },
+  '.cm-math-preview': { fontSize: '15px', maxWidth: '520px', overflowX: 'auto' },
+  '.cm-math-preview.error': { fontSize: '12px', color: 'var(--error)', fontFamily: 'inherit' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': {
     backgroundColor: 'var(--hover)',
     color: 'var(--ink)',
@@ -376,6 +461,7 @@ export function Editor({
       completion,
       paletteKeys,
       findAndReplace,
+      mathPreview,
       lintGutter(),
       errorGutter(results),
       inlineResults(results),

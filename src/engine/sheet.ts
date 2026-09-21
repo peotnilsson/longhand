@@ -39,6 +39,8 @@ import { absoluteTemperatureMisuse } from './temperature'
 import { checked, defineUnit, parseSignature, parseUnitLine } from './declare'
 import { IterateError, iterate, parseIterate } from './iterate'
 import { MathSyntaxError, alignToTex, mathToTex } from './mathline'
+import { ShowError, showWorking } from './symbolic'
+import { OdeError, parseOde, solveOde } from './ode'
 
 export type { ToleranceMode }
 
@@ -65,6 +67,8 @@ export type Line =
   | { kind: 'blank' }
   | { kind: 'heading'; text: string; level: number }
   | { kind: 'prose'; text: string }
+  /** a), b), c) — the parts of an exercise, each with the question it asks. */
+  | { kind: 'part'; label: string; text: string }
   | { kind: 'note'; text: string }
   | {
       kind: 'calc'
@@ -110,7 +114,17 @@ export type Line =
     }
   | { kind: 'plot'; data: PlotData; summary: string }
   /** Mathematics written to be read — a `math` line or an `align` block — never evaluated. */
-  | { kind: 'math'; tex: string; note?: string }
+  | {
+      kind: 'math'
+      tex: string
+      note?: string
+      /** What the editor shows at the end of the line, for `show`: "= 2*x". */
+      summary?: string
+      /** The label of a numbered line, `math #ode …`, for @references. */
+      name?: string
+      /** Its equation number, shared with the calculation lines. */
+      equation?: number
+    }
   | { kind: 'error'; source: string; message: string }
 
 interface Definition {
@@ -887,6 +901,7 @@ function evaluateFigure(line: string, context: Context): Line {
 function resolveReferences(results: Line[]): Line[] {
   const figures = new Map<string, number>()
   const equations = new Map<string, number>()
+  const stated = new Map<string, number>()
 
   let equation = 0
   const numbered = results.map((line) => {
@@ -899,22 +914,34 @@ function resolveReferences(results: Line[]): Line[] {
       equations.set(line.name, equation)
       return { ...line, equation }
     }
+    // A labelled math line shares the sheet's numbering, and a reference to
+    // it prints the way a textbook's does: (3), not "eq. 3".
+    if (line.kind === 'math' && line.name) {
+      equation += 1
+      stated.set(line.name, equation)
+      return { ...line, equation }
+    }
     return line
   })
 
-  if (figures.size === 0 && equations.size === 0) return numbered
+  if (figures.size === 0 && equations.size === 0 && stated.size === 0) return numbered
 
   const swap = (text: string): string =>
     text.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, id: string) => {
       if (figures.has(id)) return `Figure ${figures.get(id)}`
       if (equations.has(id)) return `eq. ${equations.get(id)}`
+      if (stated.has(id)) return `(${stated.get(id)})`
       return whole
     })
 
   return numbered.map((line) => {
-    if (line.kind === 'prose' || line.kind === 'note') {
+    if (line.kind === 'prose' || line.kind === 'note' || line.kind === 'part') {
       const text = swap(line.text)
       return text === line.text ? line : { ...line, text }
+    }
+    if (line.kind === 'math' && line.note) {
+      const note = swap(line.note)
+      return note === line.note ? line : { ...line, note }
     }
     if (line.kind === 'calc' || line.kind === 'definition' || line.kind === 'check') {
       const note = line.note === undefined ? undefined : swap(line.note)
@@ -958,7 +985,14 @@ function evaluatePlot(line: string, context: Context, defined: Set<string>): Lin
       const sample = xUnit ? math.unit(x, xUnit) : x
       // Re-run the sheet's definitions with this variable overridden, which is
       // what makes plotting a derived quantity possible at all.
+      // Functions come along as they are — a solved ODE or a library function
+      // does not depend on the plotted variable and is not a definition to
+      // re-run. Values are left out on purpose, so that one which cannot be
+      // recomputed under the override fails loudly instead of plotting flat.
       const scope: Record<string, unknown> = { [variable]: sample }
+      for (const [key, value] of Object.entries(context.scope)) {
+        if (typeof value === 'function' && key !== variable) scope[key] = value
+      }
       for (const definition of context.definitions) {
         if (definition.name === variable) continue
         try {
@@ -1026,6 +1060,49 @@ function evaluateImport(
  */
 /** `math {` on its own, or `math f(x) = {` — a system or a piecewise definition over several lines. */
 const MATH_BLOCK = /^math\b.*\{\s*$/
+const ALIGN_BLOCK = /^align(?:\s+#[A-Za-z_][A-Za-z0-9_]*)?\s*$/
+
+/**
+ * `y = ode y'' - y' - 2y = x, y(0) = 2, y'(0) = 0 for x from 0 to 3`
+ *
+ * Prints the problem the way it is set — the equation and its conditions in
+ * a brace — and puts the solution in scope as a function, so the lines below
+ * can call it, plot it and check a hand-worked answer against it.
+ */
+function evaluateOde(line: string, context: Context, note?: string): Line {
+  const request = parseOde(line)!
+  try {
+    const solution = solveOde(request, context.scope)
+    context.scope[request.name] = solution.fn
+    let problem: string
+    try {
+      problem = mathToTex(`{ ${request.equation} ; ${request.conditions.join(', ')} }`)
+    } catch {
+      problem = `\\text{${request.equation}}`
+    }
+    return {
+      kind: 'definition',
+      tex: `${problem} \\qquad ${request.variable} \\in [${solution.from}, ${solution.to}]`,
+      summary: `${request.name}() solved for ${request.variable} from ${solution.from} to ${solution.to}`,
+      name: request.name,
+      ...(note ? { note } : {}),
+    }
+  } catch (error) {
+    if (error instanceof OdeError) return { kind: 'error', source: line, message: error.message }
+    throw error
+  }
+}
+
+/**
+ * `math #ode …`, `align #steps`, `math #sys {` — a label right after the
+ * keyword numbers the line, so prose can point at it with @ode. Returns the
+ * label and the line without it.
+ */
+function takeLabel(line: string): { label?: string; rest: string } {
+  const match = line.match(/^(math|align)\s+#([A-Za-z_][A-Za-z0-9_]*)\b\s*(.*)$/)
+  if (!match) return { rest: line }
+  return { label: match[2], rest: `${match[1]} ${match[3]}`.trimEnd() }
+}
 
 /** A math line, or the reason it would not parse — never both, never a guess. */
 function mathLine(translate: () => string, source: string, note?: string): Line {
@@ -1062,10 +1139,11 @@ function runLines(
       }
     } else if (line.startsWith('//')) {
       result = { kind: 'prose', text: line.replace(/^\/\/\s*/, '') }
-    } else if (MATH_BLOCK.test(line) || /^align\s*$/.test(line)) {
+    } else if (MATH_BLOCK.test(line) || ALIGN_BLOCK.test(line)) {
       // A system written over several lines, or an aligned derivation: both
       // are blocks like a table, so the rows below belong to this line.
-      const align = /^align\s*$/.test(line)
+      const align = ALIGN_BLOCK.test(line)
+      const { label, rest: opener } = takeLabel(line)
       const closes = (text: string) => (align ? splitNote(text).body === 'end' : text === '}')
       const rows: string[] = []
       let cursor = index + 1
@@ -1085,7 +1163,8 @@ function runLines(
       } else {
         result = align
           ? mathLine(() => alignToTex(rows), line)
-          : mathLine(() => mathToTex(`${line.replace(/^math\b/, '').replace(/\{\s*$/, '')} { ${rows.join(' ; ')} }`), line)
+          : mathLine(() => mathToTex(`${opener.replace(/^math\b/, '').replace(/\{\s*$/, '')} { ${rows.join(' ; ')} }`), line)
+        if (label && result.kind === 'math') result = { ...result, name: label }
       }
       results.push(result)
       snapshots?.push(cloneContext(context))
@@ -1095,9 +1174,31 @@ function runLines(
       }
       index = cursor
       continue
+    } else if (/^[a-h]\)(\s|$)/.test(line)) {
+      // a) Visa att … — a part of an exercise. Nothing on this line can be a
+      // calculation (a bare letter and a closing bracket never parse), so
+      // taking it over costs nothing.
+      result = { kind: 'part', label: line[0], text: line.slice(2).trim() }
+    } else if (/^(svar|answer)\b\s*:?\s+\S/i.test(line) && !/^(svar|answer)\s*=/i.test(line)) {
+      // The answer, boxed, the way it is marked at the end of a solution.
+      const { body, note } = splitNote(line)
+      result = mathLine(() => `\\boxed{${mathToTex(body.replace(/^(svar|answer)\b\s*:?\s*/i, ''))}}`, line, note)
+    } else if (parseOde(splitNote(line).body)) {
+      result = evaluateOde(splitNote(line).body, context, splitNote(line).note)
+    } else if (/^show\s/.test(line) && !/^show\s*=/.test(line)) {
+      const { body, note } = splitNote(line)
+      try {
+        const shown = showWorking(body.replace(/^show\s+/, ''))
+        result = { kind: 'math', tex: shown.tex, summary: `= ${shown.result}`, ...(note ? { note } : {}) }
+      } catch (error) {
+        if (!(error instanceof ShowError)) throw error
+        result = { kind: 'error', source: line, message: error.message }
+      }
     } else if (/^math\s/.test(line) && !/^math\s*=/.test(line)) {
       const { body, note } = splitNote(line)
-      result = mathLine(() => mathToTex(body.replace(/^math\s+/, '')), line, note)
+      const { label, rest } = takeLabel(body)
+      result = mathLine(() => mathToTex(rest.replace(/^math\s+/, '')), line, note)
+      if (label && result.kind === 'math') result = { ...result, name: label }
     } else if (/^import\b/.test(line)) {
       result = evaluateImport(splitNote(line).body, context, options, libraries, depth)
     } else if (/^page\s+break\s*$/.test(line)) {
@@ -1210,7 +1311,7 @@ function blockStart(lines: string[], index: number): number {
   for (let cursor = 0; cursor <= index && cursor < lines.length; cursor += 1) {
     const line = lines[cursor].trim()
     if (open === -1) {
-      if (/^table\b/.test(line) || /^align\s*$/.test(line)) {
+      if (/^table\b/.test(line) || ALIGN_BLOCK.test(line)) {
         open = cursor
         closer = (text) => splitNote(text).body === 'end'
       } else if (MATH_BLOCK.test(line)) {

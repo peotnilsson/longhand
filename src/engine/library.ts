@@ -422,6 +422,27 @@ export function deriv(f: unknown, x: unknown): unknown {
   )
 }
 
+/**
+ * The roots of a polynomial, given its coefficients highest power first —
+ * the order it is written in: roots(1, -1, -2) for r² − r − 2.
+ *
+ * mathjs has polynomialRoot, but it takes the coefficients the other way
+ * round, constant first, which is the one order nobody writes a characteristic
+ * equation in. Complex roots come back as complex numbers, which is exactly
+ * what a characteristic equation with no real roots needs.
+ */
+export function roots(...coefficients: unknown[]): unknown {
+  const values = coefficients.map((coefficient) => math.number(coefficient as any))
+  while (values.length > 1 && values[0] === 0) values.shift()
+  if (values.length < 2) throw new Error('roots needs at least two coefficients: roots(a, b) for a x + b')
+  if (values.length > 4) throw new Error('roots handles up to a cubic: roots(a, b, c, d)')
+  const found = (math as any).polynomialRoot(...values.reverse()) as unknown[]
+  // Real roots as plain numbers, so they format and compute like any other.
+  return found.map((root: any) =>
+    root && typeof root === 'object' && root.isComplex && Math.abs(root.im) < 1e-12 ? root.re : root,
+  )
+}
+
 export const LIBRARY_NAMES = [
   'mean',
   'sd',
@@ -437,6 +458,7 @@ export const LIBRARY_NAMES = [
   'interp2',
   'integral',
   'deriv',
+  'roots',
 ]
 
 export const library = (): Record<string, unknown> => ({
@@ -454,4 +476,5 @@ export const library = (): Record<string, unknown> => ({
   interp2,
   integral,
   deriv,
+  roots,
 })

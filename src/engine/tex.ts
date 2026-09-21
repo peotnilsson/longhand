@@ -32,6 +32,8 @@ export function symbolToTex(name: string, scope: Record<string, unknown> = {}): 
 /** mathjs writes exponents as 10^{+7} and the micro prefix as "um". */
 const cleanTex = (tex: string): string =>
   tex
+    // 3i is three times i, and mathjs writes the product with a space in it
+    .replace(/~\{i\}/g, 'i')
     .replace(/10\^\{\+/g, '10^{')
     .replace(/\\mathrm\{u([A-Za-z]{1,2})\}/g, '\\mathrm{\\mu $1}')
     // a function called A_circle must render as A subscript circle, not with a
@@ -68,6 +70,18 @@ const escapeName = (name: string): string => name.replace(/_/g, '\\_')
  * beside its own ± printed the other is the kind of thing a reviewer stops at.
  */
 export function valueToTex(formatted: string, scope: Record<string, unknown>): string {
+  // A matrix, as formatVector writes a small one: "[1, 2; 3, 4]".
+  const matrix = formatted.match(/^\[(.*;.*)\]$/)
+  if (matrix) {
+    const rows = matrix[1]
+      .split(';')
+      .map((row) => row.split(',').map((cell) => scalarToTex(cell.trim(), scope)).join(' & '))
+    return `\\begin{bmatrix}${rows.join(' \\\\ ')}\\end{bmatrix}`
+  }
+
+  const complex = complexToTex(formatted)
+  if (complex) return complex
+
   // A list, as formatVector writes it: "[1, 2, 3] mm" or "[1, 2, …] mm (20 values)".
   const list = formatted.match(/^\[(.*)\]\s*([^\s(]*)\s*(\(\d+ values\))?$/)
   if (list) {
@@ -75,7 +89,7 @@ export function valueToTex(formatted: string, scope: Record<string, unknown>): s
     const elements = body
       .split(',')
       .map((element) => element.trim())
-      .map((element) => (element === '…' ? '\\dots' : numberToTex(element)))
+      .map((element) => (element === '…' ? '\\dots' : complexToTex(element) ?? numberToTex(element)))
       .join(',\\; ')
     const tail = count ? `\\;\\text{${count.replace(/[()]/g, '')}}` : ''
     return `\\left[${elements}\\right]${unit ? `~${unitToTex(unit)}` : ''}${tail}`
@@ -170,6 +184,29 @@ function parseUnitFactors(unit: string, outerSign = 1): { name: string; power: n
 }
 
 /** "1.25e7" -> 1.25 \cdot 10^{7}, anything else unchanged. */
+/** One cell of a matrix: a number, a complex number or a quantity. */
+const scalarToTex = (cell: string, scope: Record<string, unknown>): string =>
+  complexToTex(cell) ?? valueToTex(cell, scope)
+
+/**
+ * A complex number as mathjs prints one — "2 + 3i", "-1.5i", "i" — written
+ * the way it is on paper, with the i upright-free and no unit-shaped gap.
+ * Null for anything that is not one.
+ */
+function complexToTex(text: string): string | null {
+  const num = '(-?[\\d.]+(?:e[+-]?\\d+)?)'
+  const full = text.match(new RegExp(`^${num}\\s*([+-])\\s*([\\d.]+(?:e[+-]?\\d+)?)?i$`))
+  if (full) {
+    const [, real, sign, imaginary] = full
+    return `${numberToTex(real)} ${sign} ${imaginary ? numberToTex(imaginary) : ''}i`.replace(/ {2}/g, ' ')
+  }
+  const pure = text.match(new RegExp(`^${num}?i$`))
+  if (pure) return `${pure[1] ? numberToTex(pure[1]) : ''}i`
+  const negative = text.match(/^-i$/)
+  if (negative) return '-i'
+  return null
+}
+
 const numberToTex = (number: string): string => {
   const exponential = number.match(/^(-?[\d.]+)e([+-]?\d+)$/)
   if (!exponential) return number

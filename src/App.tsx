@@ -120,10 +120,18 @@ const Rendered = memo(function Rendered({
         </p>
       )
 
+    case 'part':
+      return (
+        <p className="part">
+          <strong>{line.label})</strong> <ProseText text={line.text} />
+        </p>
+      )
+
     case 'math':
       // Written to be read, not computed: no substitution line, no result.
       return (
         <div className="calc-block">
+          {line.equation !== undefined && <span className="equation">({line.equation})</span>}
           <Tex tex={line.tex} className="calc math" />
           {line.note && <p className="line-note">{line.note}</p>}
         </div>
@@ -1449,6 +1457,24 @@ export default function App() {
     track('exported', { to: 'word' })
   }
 
+  /**
+   * A PDF of this sheet, named after it.
+   *
+   * The browser's own print-to-PDF is what does the work — it is the only
+   * way to get the typeset maths and the page layout into a PDF without
+   * shipping a second renderer — and browsers name the file after the page
+   * title, so the title is the sheet's for the moment the dialog is open.
+   */
+  const saveAsPdf = () => {
+    const previous = document.title
+    document.title = sheet.name || sheetTitle(sheet.source)
+    track('sheet printed', { to: 'pdf' })
+    window.print()
+    window.setTimeout(() => {
+      document.title = previous
+    }, 1000)
+  }
+
   const exportMarkdown = () => {
     download(
       toMarkdown(sheetTitle(sheet.source), lines),
@@ -1879,6 +1905,7 @@ export default function App() {
     },
     { id: 'save', label: 'Save to a file', group: 'Send', hint: 'Cmd+S', run: save },
     { id: 'open', label: 'Open a file', group: 'Send', run: () => fileInput.current?.click() },
+    { id: 'pdf', label: 'Save as PDF', group: 'Send', run: saveAsPdf },
     { id: 'word', label: 'Export for Word', group: 'Send', run: exportWord },
     { id: 'latex', label: 'Export as LaTeX', group: 'Send', run: exportLatex },
     { id: 'markdown', label: 'Export as Markdown', group: 'Send', run: exportMarkdown },
@@ -2180,6 +2207,14 @@ export default function App() {
                     }}
                   >
                     Save to a file
+                  </button>
+                  <button
+                    onClick={() => {
+                      close()
+                      saveAsPdf()
+                    }}
+                  >
+                    Save as PDF…
                   </button>
                   <p className="menu-group">App</p>
                   <button

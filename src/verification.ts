@@ -849,7 +849,7 @@ export function runCase(subject: Case): CaseResult {
       new RegExp(`^\\s*${expectation.of}\\s*=`).test(text),
     )
     const line = at === -1 ? undefined : lines[at]
-    const actual = line && 'summary' in line ? line.summary : '(no such line)'
+    const actual = (line && 'summary' in line ? line.summary : undefined) ?? '(no such line)'
     return actual.includes(expectation.contains)
       ? []
       : [{ of: expectation.of, expected: expectation.contains, actual }]

@@ -100,6 +100,9 @@ export function toLatex(title: string, lines: Line[], meta: DocumentMeta = {}): 
       case 'note':
         body.push(proseLatex(line.text), '')
         break
+      case 'part':
+        body.push('', `\\noindent\\textbf{${line.label})} ${proseLatex(line.text)}`, '')
+        break
       case 'math':
         body.push(`\\[ ${line.tex} \\]`)
         if (line.note) body.push(escapeLatex(line.note), '')
@@ -219,6 +222,13 @@ export function toWordHtml(
       case 'note':
         body.push(
           `<p>${splitInlineMath(line.text)
+            .map((piece) => (piece.tex !== undefined ? mathml(piece.tex, true) : escapeHtml(piece.text ?? '')))
+            .join('')}</p>`,
+        )
+        break
+      case 'part':
+        body.push(
+          `<p><b>${line.label})</b> ${splitInlineMath(line.text)
             .map((piece) => (piece.tex !== undefined ? mathml(piece.tex, true) : escapeHtml(piece.text ?? '')))
             .join('')}</p>`,
         )

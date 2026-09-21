@@ -109,6 +109,9 @@ export function toMarkdown(title: string, lines: Line[]): string {
       case 'math':
         out.push('', `$$${line.tex}$$`, '')
         break
+      case 'part':
+        out.push('', `**${line.label})** ${line.text}`, '')
+        break
       case 'calc':
       case 'definition':
         out.push(

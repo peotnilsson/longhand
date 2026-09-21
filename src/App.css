@@ -2054,3 +2054,13 @@ body {
   text-decoration: underline wavy var(--error);
   text-underline-offset: 3px;
 }
+
+/* a), b), c) — the parts of an exercise stand out from the working under them. */
+.sheet-page .part {
+  margin: 22px 0 6px;
+  line-height: 1.6;
+}
+
+.sheet-page .part strong {
+  margin-right: 4px;
+}

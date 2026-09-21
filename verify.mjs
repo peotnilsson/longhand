@@ -1743,6 +1743,48 @@ for (const [theme, width, height, tag] of [
   await help.close()
 }
 
+// 55. a whole exercise: parts, a numbered equation, a solved ODE, a boxed answer
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Exercise', source: [
+      '# Övning 15.9',
+      "math #ode y'' - y' - 2y = x",
+      'a) Lös @ode med $y(0) = 2$ och $y\'(0) = 0$.',
+      'show diff(x^2*sin(x), x)',
+      "y = ode y'' - y' - 2y = x, y(0) = 2, y'(0) = 0 for x from 0 to 3",
+      'exact(x) = 3/4*exp(2*x) + exp(-x) - x/2 + 1/4',
+      'abs(y(1) - exact(1)) <= 1e-6',
+      'A = [1, 2; 3, 4]',
+      'c = roots(1, 2, 5)',
+      'svar y(x) = 3/4 e^(2x) + e^(-x) - x/2 + 1/4',
+    ].join('\n') },
+  ] }], activeSheetId: 's1' })
+
+  const part = await page.$eval('.sheet-page .part', (e) => e.textContent)
+  check('a part of an exercise prints with its letter and its reference resolved',
+    /^a\)/.test(part) && part.includes('(1)'), part.slice(0, 40))
+  check('a labelled equation is numbered in the margin',
+    (await page.$$eval('.sheet-page .calc-block .equation', (els) => els.map((e) => e.textContent))).includes('(1)'))
+  check('the answer is boxed', (await page.$$('.sheet-page .calc.math .boxpad, .sheet-page .calc.math .fbox')).length > 0)
+  check('the solved ODE agrees with the hand solution',
+    (await page.$$eval('.sheet-page .check .badge', (els) => els.map((e) => e.textContent))).every((t) => t === 'OK'))
+  const text = await page.$eval('.sheet-page', (e) => e.textContent)
+  check('a matrix prints as a matrix', !/rows ×/.test(text))
+  check('nothing on the sheet is an error', (await page.$$('.sheet-page .error')).length === 0,
+    JSON.stringify(await page.$$eval('.sheet-page .error', (els) => els.map((e) => e.textContent.slice(0, 80)))))
+
+  // the live preview under the cursor
+  await page.locator('.cm-line').nth(1).click()
+  await page.keyboard.press('End')
+  await page.waitForSelector('.cm-math-preview')
+  check('the maths on the line being written is typeset under it',
+    (await page.$$('.cm-math-preview .katex')).length === 1)
+  await page.keyboard.type(' + (')
+  await page.waitForTimeout(200)
+  check('and a broken line says why, right there',
+    (await page.$('.cm-math-preview.error')) !== null)
+}
+
 await browser.close()
 
 console.log('PASS:'); ok.forEach((l) => console.log('  ✓ ' + l))
