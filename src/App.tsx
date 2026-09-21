@@ -917,6 +917,11 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null)
   const [signedBy, setSignedBy] = useState('')
   const [commanding, setCommanding] = useState(false)
+  // On a phone the sidebar is a drawer, and the screen is split between the
+  // document above and the source below. The split is the reader's to move.
+  const [drawer, setDrawer] = useState(false)
+  const [split, setSplit] = useState(48)
+  const appRef = useRef<HTMLDivElement>(null)
   const online = useOnline()
   const outputRef = useRef<HTMLDivElement>(null)
   const pagedRef = useRef<HTMLDivElement>(null)
@@ -1726,6 +1731,7 @@ export default function App() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (commanding) setCommanding(false)
+        else if (drawer) setDrawer(false)
         else if (printingProject) setPrintingProject(false)
         else if (panel !== 'none') setPanel('none')
         else return
@@ -1797,7 +1803,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [panel, printingProject, project, sheet, addSheet, commanding])
+  }, [panel, printingProject, project, sheet, addSheet, commanding, drawer])
 
   const duplicates = duplicateNames(project)
   const backupAge = backupAgeDays(store)
@@ -1974,7 +1980,15 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div
+      className={drawer ? 'app drawer-open' : 'app'}
+      ref={appRef}
+      style={{ '--split': `${split}%` } as React.CSSProperties}
+    >
+      {/* Tapping anywhere outside the drawer closes it — the way every phone
+          app's side menu works, and the thing that was missing when the
+          project list simply sat on top of half the screen. */}
+      <div className="drawer-backdrop no-print" onClick={() => setDrawer(false)} aria-hidden="true" />
       {saveFailure && (
         <div className="save-alert no-print">
           <strong>Not saving.</strong>{' '}
@@ -2038,16 +2052,23 @@ export default function App() {
                       <li key={candidateSheet.id}>
                         <button
                           className={candidateSheet.id === sheet.id ? 'sheet current' : 'sheet'}
-                          onClick={() =>
+                          onClick={() => {
                             setStore((state) => ({ ...state, activeSheetId: candidateSheet.id }))
-                          }
+                            setDrawer(false)
+                          }}
                         >
                           {candidateSheet.name}
                         </button>
                       </li>
                     ))}
                     <li>
-                      <button className="sheet add" onClick={() => addSheet()}>
+                      <button
+                        className="sheet add"
+                        onClick={() => {
+                          addSheet()
+                          setDrawer(false)
+                        }}
+                      >
                         + Sheet
                       </button>
                     </li>
@@ -2095,7 +2116,37 @@ export default function App() {
       </aside>
 
       <div className="editor-pane">
+        {/* The grip between the document and the source, on a phone. Dragging
+            it moves the split; nothing else about it does anything. */}
+        <div
+          className="split-handle no-print"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Drag to resize"
+          onPointerDown={(event) => {
+            const box = appRef.current?.getBoundingClientRect()
+            if (!box) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            const move = (moveEvent: PointerEvent) => {
+              const percent = ((moveEvent.clientY - box.top) / box.height) * 100
+              setSplit(Math.min(85, Math.max(12, percent)))
+            }
+            const up = () => {
+              window.removeEventListener('pointermove', move)
+              window.removeEventListener('pointerup', up)
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', up)
+          }}
+        />
         <div className="toolbar">
+          <button
+            className="drawer-button"
+            aria-label="Sheets and projects"
+            onClick={() => setDrawer(true)}
+          >
+            <span aria-hidden="true">☰</span>
+          </button>
           <input
             className="sheet-name"
             value={sheet.name}
@@ -2127,13 +2178,13 @@ export default function App() {
                 sheets; everything else is one click deeper, and everything at
                 all is a keystroke away in the command palette. */}
             <button
-              className={panel === 'meta' ? 'on' : ''}
+              className={panel === 'meta' ? 'on hide-narrow' : 'hide-narrow'}
               onClick={() => setPanel((current) => (current === 'meta' ? 'none' : 'meta'))}
             >
               Project
             </button>
             <button
-              className={panel === 'share' ? 'on' : ''}
+              className={panel === 'share' ? 'on hide-narrow' : 'hide-narrow'}
               onClick={() => {
                 setLink(null)
                 setPanel((current) => (current === 'share' ? 'none' : 'share'))
@@ -2142,6 +2193,7 @@ export default function App() {
               Share
             </button>
             <button
+              className="hide-narrow"
               onClick={() => {
                 track('sheet printed')
                 window.print()
@@ -2151,10 +2203,32 @@ export default function App() {
             </button>
             <ToolbarMenu
               label="More"
-              active={panel === 'settings' || panel === 'history' || panel === 'symbols'}
+              active={['settings', 'history', 'symbols'].includes(panel)}
             >
               {(close) => (
                 <>
+                  {/* On a phone the toolbar keeps only the menu, so the two
+                      buttons it drops live here instead. */}
+                  <p className="menu-group show-narrow">Project</p>
+                  <button
+                    className="show-narrow"
+                    onClick={() => {
+                      close()
+                      setPanel('meta')
+                    }}
+                  >
+                    Project and title block
+                  </button>
+                  <button
+                    className="show-narrow"
+                    onClick={() => {
+                      close()
+                      setLink(null)
+                      setPanel('share')
+                    }}
+                  >
+                    Share as a link
+                  </button>
                   <p className="menu-group">This sheet</p>
                   <button
                     onClick={() => {
@@ -2215,6 +2289,16 @@ export default function App() {
                     }}
                   >
                     Save as PDF…
+                  </button>
+                  <button
+                    className="show-narrow"
+                    onClick={() => {
+                      close()
+                      track('sheet printed')
+                      window.print()
+                    }}
+                  >
+                    Print
                   </button>
                   <p className="menu-group">App</p>
                   <button

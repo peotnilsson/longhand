@@ -1603,6 +1603,7 @@ for (const [theme, width, height, tag] of [
   await seedWith(seed)
   const rows = await page.evaluate(() => {
     const buttons = [...document.querySelectorAll('.toolbar button, .toolbar a')]
+      .filter((element) => getComputedStyle(element).display !== 'none')
     return [...new Set(buttons.map((element) => Math.round(element.getBoundingClientRect().top)))]
   })
   // A pixel of rounding between a monospace chip and a sans-serif button is
@@ -1783,6 +1784,74 @@ for (const [theme, width, height, tag] of [
   await page.waitForTimeout(200)
   check('and a broken line says why, right there',
     (await page.$('.cm-math-preview.error')) !== null)
+}
+
+// 56. a phone: the document above, the source below, the sheets in a drawer
+{
+  const phone = await openPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  phone.setDefaultTimeout(45_000)
+  await phone.goto('http://localhost:4173/app')
+  await phone.waitForSelector('.sheet-page')
+  await phone.waitForTimeout(500)
+
+  const docBox = await phone.$eval('.output-pane', (e) => e.getBoundingClientRect().toJSON())
+  const srcBox = await phone.$eval('.editor-pane', (e) => e.getBoundingClientRect().toJSON())
+  check('phone: the document is on top and the source below it',
+    docBox.top < srcBox.top && docBox.height > 250 && srcBox.height > 250,
+    `${Math.round(docBox.height)} over ${Math.round(srcBox.height)}`)
+
+  const sheetsBox = await phone.$eval('.sheets', (e) => e.getBoundingClientRect().toJSON())
+  check('phone: the project list is out of the way until asked for', sheetsBox.right <= 1,
+    `${Math.round(sheetsBox.right)}`)
+
+  const toolbar = await phone.$$eval('.toolbar button, .toolbar input', (els) =>
+    els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.textContent.trim() || e.value))
+  check('phone: the toolbar is the menu, the name and the verdict', toolbar.length <= 5, JSON.stringify(toolbar))
+
+  await phone.tap('.drawer-button')
+  await phone.waitForTimeout(350)
+  const open = await phone.$eval('.sheets', (e) => e.getBoundingClientRect().left)
+  check('phone: ☰ opens the sheets', open >= -1, `${open}`)
+  await phone.tap('.drawer-backdrop', { position: { x: 370, y: 400 } })
+  await phone.waitForTimeout(350)
+  check('phone: tapping outside puts them away again', (await phone.$('.app.drawer-open')) === null)
+
+  await phone.tap('.drawer-button')
+  await phone.waitForTimeout(350)
+  await phone.tap('.sheet:has-text("Parameter study")')
+  await phone.waitForTimeout(500)
+  check('phone: choosing a sheet opens it and closes the drawer',
+    (await phone.$('.app.drawer-open')) === null &&
+      (await phone.$eval('.sheet-name', (e) => e.value)) === 'Parameter study')
+
+  const grip = await phone.$eval('.split-handle', (e) => e.getBoundingClientRect().toJSON())
+  await phone.mouse.move(grip.x + grip.width / 2, grip.y + 8)
+  await phone.mouse.down()
+  await phone.mouse.move(grip.x + grip.width / 2, grip.y - 200, { steps: 6 })
+  await phone.mouse.up()
+  await phone.waitForTimeout(250)
+  const after = await phone.$eval('.output-pane', (e) => e.getBoundingClientRect().height)
+  check('phone: the grip moves the split', after < docBox.height - 100, `${Math.round(docBox.height)} → ${Math.round(after)}`)
+
+  await phone.tap('.toolbar-menu > button')
+  await phone.waitForSelector('.menu')
+  const menu = await phone.$$eval('.menu button', (els) =>
+    els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.textContent.trim()))
+  check('phone: what left the toolbar is in the menu',
+    menu.some((t) => /Project/.test(t)) && menu.some((t) => /Share/.test(t)) && menu.includes('Print'),
+    JSON.stringify(menu))
+  await phone.close()
+
+  // and on a desktop, none of that shows
+  await seedWith(seed)
+  await page.click('.toolbar-menu > button')
+  await page.waitForSelector('.menu')
+  const desktop = await page.$$eval('.menu button', (els) =>
+    els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.textContent.trim()))
+  check('desktop: the phone-only menu items stay hidden', !desktop.includes('Print'), JSON.stringify(desktop))
+  check('desktop: no grip, no ☰', (await page.$eval('.split-handle', (e) => getComputedStyle(e).display)) === 'none' &&
+    (await page.$eval('.drawer-button', (e) => getComputedStyle(e).display)) === 'none')
+  await page.keyboard.press('Escape')
 }
 
 await browser.close()

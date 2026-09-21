@@ -68,8 +68,7 @@ plot sigma vs b from 200 mm to 400 mm
 const STARTER_SOURCE = `# Start here
 
 // Longhand reads a sheet top to bottom, one line at a time. Edit anything
-// below and the page on the right redraws as you type. Nothing you write
-// leaves this browser.
+// and the page redraws as you type. Nothing you write leaves this browser.
 
 ## Inputs
 
