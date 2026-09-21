@@ -38,6 +38,7 @@ import {
 import { absoluteTemperatureMisuse } from './temperature'
 import { checked, defineUnit, parseSignature, parseUnitLine } from './declare'
 import { IterateError, iterate, parseIterate } from './iterate'
+import { MathSyntaxError, alignToTex, mathToTex } from './mathline'
 
 export type { ToleranceMode }
 
@@ -108,6 +109,8 @@ export type Line =
       warning?: string
     }
   | { kind: 'plot'; data: PlotData; summary: string }
+  /** Mathematics written to be read — a `math` line or an `align` block — never evaluated. */
+  | { kind: 'math'; tex: string; note?: string }
   | { kind: 'error'; source: string; message: string }
 
 interface Definition {
@@ -1021,6 +1024,19 @@ function evaluateImport(
  * Walk the lines, mutating `context`. `results` receives one Line per source
  * line so that line numbers stay aligned with the editor.
  */
+/** `math {` on its own, or `math f(x) = {` — a system or a piecewise definition over several lines. */
+const MATH_BLOCK = /^math\b.*\{\s*$/
+
+/** A math line, or the reason it would not parse — never both, never a guess. */
+function mathLine(translate: () => string, source: string, note?: string): Line {
+  try {
+    return { kind: 'math', tex: translate(), ...(note ? { note } : {}) }
+  } catch (error) {
+    if (error instanceof MathSyntaxError) return { kind: 'error', source, message: error.message }
+    throw error
+  }
+}
+
 function runLines(
   lines: string[],
   context: Context,
@@ -1046,6 +1062,42 @@ function runLines(
       }
     } else if (line.startsWith('//')) {
       result = { kind: 'prose', text: line.replace(/^\/\/\s*/, '') }
+    } else if (MATH_BLOCK.test(line) || /^align\s*$/.test(line)) {
+      // A system written over several lines, or an aligned derivation: both
+      // are blocks like a table, so the rows below belong to this line.
+      const align = /^align\s*$/.test(line)
+      const closes = (text: string) => (align ? splitNote(text).body === 'end' : text === '}')
+      const rows: string[] = []
+      let cursor = index + 1
+      while (cursor < lines.length && !closes(lines[cursor].trim())) {
+        const row = splitNote(lines[cursor]).body.trim()
+        if (row !== '') rows.push(row)
+        cursor += 1
+      }
+      if (cursor >= lines.length) {
+        result = {
+          kind: 'error',
+          source: line,
+          message: align
+            ? 'This align block never ends — put end on its own line after the last row.'
+            : 'This { is never closed — put } on its own line after the last row.',
+        }
+      } else {
+        result = align
+          ? mathLine(() => alignToTex(rows), line)
+          : mathLine(() => mathToTex(`${line.replace(/^math\b/, '').replace(/\{\s*$/, '')} { ${rows.join(' ; ')} }`), line)
+      }
+      results.push(result)
+      snapshots?.push(cloneContext(context))
+      for (let filler = index + 1; filler <= Math.min(cursor, lines.length - 1); filler += 1) {
+        results.push({ kind: 'blank' })
+        snapshots?.push(cloneContext(context))
+      }
+      index = cursor
+      continue
+    } else if (/^math\s/.test(line) && !/^math\s*=/.test(line)) {
+      const { body, note } = splitNote(line)
+      result = mathLine(() => mathToTex(body.replace(/^math\s+/, '')), line, note)
     } else if (/^import\b/.test(line)) {
       result = evaluateImport(splitNote(line).body, context, options, libraries, depth)
     } else if (/^page\s+break\s*$/.test(line)) {
@@ -1154,12 +1206,19 @@ export function marginOf(op: string, left: unknown, right: unknown): string | nu
  */
 function blockStart(lines: string[], index: number): number {
   let open = -1
+  let closer: (line: string) => boolean = () => false
   for (let cursor = 0; cursor <= index && cursor < lines.length; cursor += 1) {
     const line = lines[cursor].trim()
     if (open === -1) {
-      if (/^table\b/.test(line)) open = cursor
-    } else if (splitNote(line).body === 'end') {
-      // The end line belongs to the block it closes.
+      if (/^table\b/.test(line) || /^align\s*$/.test(line)) {
+        open = cursor
+        closer = (text) => splitNote(text).body === 'end'
+      } else if (MATH_BLOCK.test(line)) {
+        open = cursor
+        closer = (text) => text === '}'
+      }
+    } else if (closer(line)) {
+      // The closing line belongs to the block it closes.
       if (cursor === index) return open
       open = -1
     }

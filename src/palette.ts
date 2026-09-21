@@ -35,7 +35,7 @@ export interface Snippet {
 }
 
 /** Sections that describe the language. "When a line will not compute" does not. */
-const LANGUAGE_SECTIONS = ['writing', 'tables', 'harder']
+const LANGUAGE_SECTIONS = ['writing', 'tables', 'harder', 'maths']
 
 /**
  * The lines most snippets assume above them.
@@ -133,6 +133,21 @@ const SNIPPETS: Record<string, { template: string; preamble?: string }> = {
     preamble: 'w(x) = 10 kN/m + x*2 kN/m^2\n',
   },
   kinds: { template: '${A_circle}(${d}: length) = ${pi*d^2/4}' },
+
+  'math-line': { template: "math ${y'' - y' - 2y = x}" },
+  'math-system': { template: "math {\n  ${y'' - y' - 2y = x}\n  ${y(0) = 2, y'(0) = 0}\n}" },
+  'math-piecewise': { template: 'math ${f(x)} = { ${x^2} if ${x < 0} ; ${2x} if ${x >= 0} }' },
+  'math-align': { template: 'align\n  ${r^2 - r - 2 = 0}\n  <=> ${(r - 2)(r + 1) = 0}\nend' },
+  'math-inline': { template: '// ${The roots are} $${r = 2}$' },
+  'math-logic': { template: 'math ${x^2 = 4} <=> ${x = 2 or x = -2}' },
+  'math-sets': { template: 'math ${x} in ${]0, 1[}' },
+  'math-functions': { template: 'math ${sin^2 x + cos^2 x = 1}' },
+  'math-roots': { template: 'math sqrt(${x^2}) = |${x}|' },
+  'math-limits': { template: 'math lim(${x -> 0}, ${sin(x)/x}) = ${L}' },
+  'math-derivatives': { template: 'math diff(${y}, ${x}) = ${2x}' },
+  'math-integrals': { template: 'math int(${f(x)}, ${x}, ${a}, ${b}) = ${eval(F(x), a, b)}' },
+  'math-sums': { template: 'math sum(${k = 1}, ${n}, ${k}) = ${n(n + 1)/2}' },
+  'math-ordo': { template: 'math ${e^x = 1 + x} + ordo(${x^2})' },
 }
 
 const entriesOf = (section: Section): Entry[] => section.entries ?? []
@@ -175,6 +190,20 @@ const LABELS: Record<string, string> = {
   interp2: 'interpolate in two directions',
   calculus: 'integral',
   kinds: 'function with kinds',
+  'math-line': 'equation to show',
+  'math-system': 'system of equations',
+  'math-piecewise': 'piecewise function',
+  'math-align': 'aligned derivation',
+  'math-inline': 'maths in a sentence',
+  'math-logic': 'implication and equivalence',
+  'math-sets': 'set or interval',
+  'math-functions': 'sin, ln, arctan',
+  'math-roots': 'root or absolute value',
+  'math-limits': 'limit, written out',
+  'math-derivatives': 'derivative dy/dx',
+  'math-integrals': 'integral, written out',
+  'math-sums': 'sum or series',
+  'math-ordo': 'big O',
 }
 
 export const PALETTE: Snippet[] = REFERENCE.filter((section) =>

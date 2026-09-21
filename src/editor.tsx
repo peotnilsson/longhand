@@ -23,7 +23,7 @@ import { BUILTIN_NAMES, unitNames, type Line } from './engine'
 import { filterPalette, paletteAt } from './palette'
 import { track } from './analytics'
 
-const KEYWORDS = ['table', 'end', 'plot', 'import', 'solve', 'for', 'vs', 'from', 'to']
+const KEYWORDS = ['table', 'end', 'plot', 'import', 'solve', 'for', 'vs', 'from', 'to', 'math', 'align']
 
 /** A deliberately small tokenizer — this is a calculation sheet, not a language. */
 const sheetLanguage = StreamLanguage.define<{ afterNumber: boolean }>({

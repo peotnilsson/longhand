@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ENTRIES, REFERENCE, filterSections, type Entry, type Section } from '../reference'
 import { EXAMPLES } from '../examples'
 import { SiteHeader } from '../SiteHeader'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
+import { alignToTex, mathToTex, splitInlineMath } from '../engine/mathline'
 import '../landing/landing.css'
 import './docs.css'
 
@@ -36,6 +39,74 @@ function Code({ text }: { text: string }) {
   )
 }
 
+/**
+ * What an example looks like once typeset — for the maths you write to be
+ * read, where the whole point is the picture, and a line of source says
+ * nothing about whether it came out right.
+ *
+ * This reads the example with the maths translator alone rather than the
+ * whole engine, which keeps the calculator out of the help page.
+ */
+function MathPreview({ example }: { example: string }) {
+  const pieces: { tex?: string; inline?: { text?: string; tex?: string }[] }[] = []
+  const lines = example.split('\n')
+  for (let at = 0; at < lines.length; at += 1) {
+    const line = lines[at].trim()
+    try {
+      if (/^align\s*$/.test(line)) {
+        const rows: string[] = []
+        while (++at < lines.length && lines[at].trim() !== 'end') {
+          if (lines[at].trim()) rows.push(lines[at].trim())
+        }
+        pieces.push({ tex: alignToTex(rows) })
+      } else if (/^math\b.*\{\s*$/.test(line)) {
+        const rows: string[] = []
+        while (++at < lines.length && lines[at].trim() !== '}') {
+          if (lines[at].trim()) rows.push(lines[at].trim())
+        }
+        pieces.push({ tex: mathToTex(`${line.replace(/^math\b/, '').replace(/\{\s*$/, '')} { ${rows.join(' ; ')} }`) })
+      } else if (/^math\s/.test(line)) {
+        pieces.push({ tex: mathToTex(line.replace(/^math\s+/, '')) })
+      } else if (line.startsWith('//')) {
+        pieces.push({ inline: splitInlineMath(line.replace(/^\/\/\s*/, '')) })
+      }
+    } catch {
+      /* the tests guarantee every example parses; a broken one just shows no preview */
+    }
+  }
+  if (pieces.length === 0) return null
+
+  return (
+    <div className="math-preview" aria-label="How it looks">
+      {pieces.map((piece, index) =>
+        piece.tex !== undefined ? (
+          <div
+            key={index}
+            dangerouslySetInnerHTML={{
+              __html: katex.renderToString(piece.tex, { displayMode: true, throwOnError: false }),
+            }}
+          />
+        ) : (
+          <p key={index}>
+            {piece.inline!.map((part, partIndex) =>
+              part.tex !== undefined ? (
+                <span
+                  key={partIndex}
+                  dangerouslySetInnerHTML={{
+                    __html: katex.renderToString(part.tex, { throwOnError: false }),
+                  }}
+                />
+              ) : (
+                <span key={partIndex}>{part.text}</span>
+              ),
+            )}
+          </p>
+        ),
+      )}
+    </div>
+  )
+}
+
 function EntryCard({ entry }: { entry: Entry }) {
   return (
     <article className="entry" id={entry.id}>
@@ -47,6 +118,7 @@ function EntryCard({ entry }: { entry: Entry }) {
       <p className="summary">{entry.summary}</p>
       {entry.detail && <p className="detail">{entry.detail}</p>}
       {entry.example && <Code text={entry.example} />}
+      {entry.example && entry.preview && <MathPreview example={entry.example} />}
     </article>
   )
 }

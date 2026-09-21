@@ -53,6 +53,7 @@ import { describeDiff, diffLines, withContext } from './diff'
 import { toLatex, toWordHtml, type DocumentMeta } from './export'
 import { CommandPalette, type Command } from './Commands'
 import { useEvaluation } from './evaluator'
+import { splitInlineMath } from './engine/mathline'
 import {
   checkSignature,
   shortHash,
@@ -113,7 +114,20 @@ const Rendered = memo(function Rendered({
       // of reasoning wrapped them because the editor is narrow, not because
       // they meant three paragraphs, and printing them as three left the
       // document full of gaps that were not in the author's head.
-      return prose === '' ? null : <p className="prose">{prose ?? line.text}</p>
+      return prose === '' ? null : (
+        <p className="prose">
+          <ProseText text={prose ?? line.text} />
+        </p>
+      )
+
+    case 'math':
+      // Written to be read, not computed: no substitution line, no result.
+      return (
+        <div className="calc-block">
+          <Tex tex={line.tex} className="calc math" />
+          {line.note && <p className="line-note">{line.note}</p>}
+        </div>
+      )
 
     case 'note':
       return <p className="note">{line.text}</p>
@@ -328,6 +342,47 @@ function typeset(tex: string): string {
   }
   rendered.set(tex, html)
   return html
+}
+
+const inlineRendered = new Map<string, string>()
+
+function typesetInline(tex: string): string {
+  const hit = inlineRendered.get(tex)
+  if (hit !== undefined) return hit
+  const html = katex.renderToString(tex, { displayMode: false, throwOnError: false })
+  if (inlineRendered.size >= MAX_RENDERED) inlineRendered.clear()
+  inlineRendered.set(tex, html)
+  return html
+}
+
+/**
+ * A sentence with $…$ maths in it, the way a written solution mixes the two.
+ *
+ * A piece that will not parse is shown as typed, underlined, with the reason
+ * on hover — rather than dropped, which would leave a sentence with a hole in
+ * it that reads as if nothing were missing.
+ */
+function ProseText({ text }: { text: string }) {
+  if (!text.includes('$')) return <>{text}</>
+  return (
+    <>
+      {splitInlineMath(text).map((piece, index) =>
+        piece.tex !== undefined ? (
+          <span
+            key={index}
+            className="inline-math"
+            dangerouslySetInnerHTML={{ __html: typesetInline(piece.tex) }}
+          />
+        ) : piece.error ? (
+          <span key={index} className="inline-math-error" title={piece.error}>
+            {piece.text}
+          </span>
+        ) : (
+          <span key={index}>{piece.text}</span>
+        ),
+      )}
+    </>
+  )
 }
 
 function Tex({ tex, className }: { tex: string; className: string }) {
@@ -626,7 +681,7 @@ function SheetDocument({
       )}
       {/* A sheet with nothing worked out in it shows a title block and two
           inches of white, which tells a first-time reader nothing at all. */}
-      {!lines.some((line) => line.kind === 'calc' || line.kind === 'table' || line.kind === 'check') && (
+      {!lines.some((line) => !['blank', 'heading', 'prose', 'note', 'error'].includes(line.kind)) && (
         <p className="empty-hint no-print">
           Nothing computed yet. Write a line like <code>b = 300 mm</code> on the left, or press{' '}
           <kbd>/</kbd> on an empty line for the list of everything you can write.
@@ -1384,8 +1439,8 @@ export default function App() {
    * of one. KaTeX already knows how to produce the MathML.
    */
   const exportWord = () => {
-    const mathml = (tex: string) =>
-      katex.renderToString(tex, { output: 'mathml', displayMode: true, throwOnError: false })
+    const mathml = (tex: string, inline?: boolean) =>
+      katex.renderToString(tex, { output: 'mathml', displayMode: !inline, throwOnError: false })
     download(
       toWordHtml(sheetTitle(sheet.source), lines, mathml, documentMeta()),
       `${slug(sheet.name)}.doc`,

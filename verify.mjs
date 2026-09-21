@@ -1707,6 +1707,42 @@ for (const [theme, width, height, tag] of [
     JSON.stringify(margins))
 }
 
+// 53. mathematics written to be read: a system, a derivation, maths in a sentence
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Maths', source: [
+      '# Övning 15.9',
+      "math { y'' - y' - 2y = x ; y(0) = 2, y'(0) = 0 }",
+      '// Den karakteristiska ekvationen $r^2 - r - 2 = 0$ har rötterna $r = 2$ och $r = -1$.',
+      'align',
+      '  r^2 - r - 2 = 0',
+      '  <=> (r - 2)(r + 1) = 0',
+      'end',
+      'math lim(x -> 0, sin(x)/x) = 1',
+    ].join('\n') },
+  ] }], activeSheetId: 's1' })
+
+  const blocks = await page.$$('.sheet-page .calc.math .katex')
+  check('a math line is typeset, and so is an aligned block', blocks.length === 3, `${blocks.length}`)
+  const brace = await page.$eval('.sheet-page .calc.math', (e) => e.innerHTML)
+  check('the system gets its big brace', /delimsizing|mopen/.test(brace))
+  const inline = await page.$$('.sheet-page .prose .inline-math .katex')
+  check('maths in the middle of a sentence is typeset in the line', inline.length === 3, `${inline.length}`)
+  const prose = await page.$eval('.sheet-page .prose', (e) => e.textContent)
+  check('and the words around it stay words', /har rötterna/.test(prose) && !prose.includes('$'), prose.slice(0, 60))
+  check('none of it is an error', (await page.$$('.sheet-page .error')).length === 0)
+}
+
+// 54. the help page shows what the maths comes out as
+{
+  const help = await openPage({ viewport: { width: 1200, height: 900 } })
+  await help.goto('http://localhost:4173/docs#maths')
+  await help.waitForSelector('#math-system')
+  const previews = await help.$$('.math-preview .katex')
+  check('Help typesets every maths example under its source', previews.length > 20, `${previews.length}`)
+  await help.close()
+}
+
 await browser.close()
 
 console.log('PASS:'); ok.forEach((l) => console.log('  ✓ ' + l))

@@ -404,3 +404,21 @@ kbd {
     padding-top: 18px;
   }
 }
+
+/* The typeset result under a maths example: what you get, not only what you type. */
+.math-preview {
+  margin-top: 8px;
+  padding: 6px 16px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--rule, #e3e1dc);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.math-preview p {
+  margin: 10px 0;
+}
+
+.math-preview .katex-display {
+  margin: 10px 0;
+}

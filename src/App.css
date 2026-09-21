@@ -2044,3 +2044,13 @@ body {
   margin: 6px 0 0;
   font-size: 12px;
 }
+
+/* Maths inside a sentence sits on the line with the words around it. */
+.inline-math .katex {
+  font-size: 1.05em;
+}
+
+.inline-math-error {
+  text-decoration: underline wavy var(--error);
+  text-underline-offset: 3px;
+}

@@ -48,9 +48,11 @@ describe('the palette', () => {
     })
   }
 
+  // A literal brace is fine — a system of equations is written with them —
+  // but a field that survived filling is not.
   it('leaves no placeholder syntax behind once the fields are filled', () => {
     for (const item of PALETTE) {
-      expect(filled(item.template), item.id).not.toMatch(/\$\{|\}/)
+      expect(filled(item.template), item.id).not.toMatch(/\$\{/)
     }
   })
 

@@ -1,4 +1,5 @@
 import type { Line } from './engine'
+import { splitInlineMath } from './engine/mathline'
 
 /**
  * A sheet, out of Longhand and into somebody else's document.
@@ -43,6 +44,12 @@ const escapeHtml = (text: string): string =>
 /** A table cell as text, with a verdict's margin beside it. */
 const cellText = (cell: { text: string; margin?: string }): string =>
   cell.margin ? `${cell.text} (${cell.margin})` : cell.text
+
+/** Prose for LaTeX: the words escaped, the $…$ pieces as real maths. */
+const proseLatex = (text: string): string =>
+  splitInlineMath(text)
+    .map((piece) => (piece.tex !== undefined ? `$${piece.tex}$` : escapeLatex(piece.text ?? '')))
+    .join('')
 
 const SECTIONS = ['section', 'subsection', 'subsubsection', 'paragraph', 'paragraph', 'paragraph']
 
@@ -91,7 +98,11 @@ export function toLatex(title: string, lines: Line[], meta: DocumentMeta = {}): 
         break
       case 'prose':
       case 'note':
-        body.push(escapeLatex(line.text), '')
+        body.push(proseLatex(line.text), '')
+        break
+      case 'math':
+        body.push(`\\[ ${line.tex} \\]`)
+        if (line.note) body.push(escapeLatex(line.note), '')
         break
       case 'definition':
         body.push(`\\[ ${line.tex} \\]`)
@@ -176,7 +187,7 @@ export function toLatex(title: string, lines: Line[], meta: DocumentMeta = {}): 
 export function toWordHtml(
   title: string,
   lines: Line[],
-  mathml: (tex: string) => string,
+  mathml: (tex: string, inline?: boolean) => string,
   meta: DocumentMeta = {},
 ): string {
   const body: string[] = []
@@ -206,7 +217,15 @@ export function toWordHtml(
         break
       case 'prose':
       case 'note':
-        body.push(`<p>${escapeHtml(line.text)}</p>`)
+        body.push(
+          `<p>${splitInlineMath(line.text)
+            .map((piece) => (piece.tex !== undefined ? mathml(piece.tex, true) : escapeHtml(piece.text ?? '')))
+            .join('')}</p>`,
+        )
+        break
+      case 'math':
+        body.push(`<p class="calc">${mathml(line.tex)}</p>`)
+        if (line.note) body.push(`<p class="note">${escapeHtml(line.note)}</p>`)
         break
       case 'definition':
       case 'calc':

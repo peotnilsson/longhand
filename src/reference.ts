@@ -20,6 +20,8 @@ export interface Entry {
   example?: string
   /** Extra words a search should match. */
   keywords?: string[]
+  /** Show the example typeset under the code — for the maths you write to be read. */
+  preview?: boolean
 }
 
 export interface Prose {
@@ -357,6 +359,158 @@ export const REFERENCE: Section[] = [
     ],
   },
 
+  {
+    id: 'maths',
+    title: 'Writing out a solution',
+    blurb:
+      'Everything above is worked out. A written solution also needs mathematics that is only stated — the equation you are about to solve, a system with its big brace, the chain of ⇔ from a polynomial to its roots, the limit you are claiming. A line starting with math is typeset and never evaluated, so it can say anything. It is written the way you would type maths in a plain text box: x^2, a/b, sqrt(x), <=>. Put $…$ inside a // comment for maths in the middle of a sentence.',
+    entries: [
+      {
+        id: 'math-line',
+        code: "math y'' - y' - 2y = x",
+        summary: 'An equation, typeset and not computed.',
+        detail:
+          "Primes are written as they are printed — y', y'', f'(x) — and so are subscripts: y_p, a_n, a_(n+1). A slash becomes a fraction, dropping the brackets it no longer needs: (a+b)/(c+d). Powers group their exponent: e^(2x), x^-1. Numbers and letters side by side multiply, so 2y and (r-2)(r+1) mean what they look like. Nothing on the line has to be defined anywhere, because nothing on it is worked out.",
+        example: "math y'' - y' - 2y = x\nmath y_p(x) = a x + b\nmath e^(2x) (r - 2)(r + 1) = (a + b)/(c + d)\n",
+        keywords: ['equation', 'display', 'formula', 'typeset', 'latex', 'derivative', 'prime', 'ode', 'show'],
+        preview: true,
+      },
+      {
+        id: 'math-system',
+        code: 'math { … ; … }',
+        summary: 'A system of equations, with the big brace.',
+        detail:
+          'Rows inside { } are separated by semicolons. For a longer one, end the math line with { and put each row on a line of its own, closed by } on its own line. Without a semicolon, { } is a set: { x in RR : x > 0 }.',
+        example:
+          "math { y'' - y' - 2y = x ; y(0) = 2, y'(0) = 0 }\n\nmath {\n  x + y = 3\n  x - y = 1\n}\n",
+        keywords: ['system', 'brace', 'cases', 'initial value problem', 'begynnelsevärdesproblem', 'ekvationssystem', '{'],
+        preview: true,
+      },
+      {
+        id: 'math-piecewise',
+        code: 'math f(x) = { x^2 if x < 0 ; 2x if x >= 0 }',
+        summary: 'A function defined piece by piece.',
+        detail:
+          'The word if — or om — puts each condition in a column of its own, the way a piecewise definition is printed.',
+        example: 'math f(x) = { x^2 if x < 0 ; 2x om x >= 0 }\nmath |x| = { x if x >= 0 ; -x if x < 0 }\n',
+        keywords: ['piecewise', 'cases', 'styckvis', 'absolute value', 'definition'],
+        preview: true,
+      },
+      {
+        id: 'math-align',
+        code: 'align … end',
+        summary: 'A derivation, lined up on its = and ⇔.',
+        detail:
+          'One step per line, aligned on the first relation. A line that starts with a relation — = , <=>, => — continues the one above it, which is how a chain of equivalences or a long calculation is written out.',
+        example:
+          'align\n  r^2 - r - 2 = 0\n  <=> (r - 2)(r + 1) = 0\n  <=> r = 2 or r = -1\nend\n',
+        keywords: ['align', 'derivation', 'steps', 'chain', 'equivalence', 'ekvivalens', 'uträkning'],
+        preview: true,
+      },
+      {
+        id: 'math-inline',
+        code: '// The roots are $r = 2$ and $r = -1$.',
+        summary: 'Maths in the middle of a sentence.',
+        detail:
+          'Anything between two $ in a comment is typeset in the line, with the same writing as a math line. A written solution is an argument, and an argument that can only put maths on lines of its own reads like a list of equations.',
+        example: '// The characteristic equation $r^2 - r - 2 = 0$ has the roots $r = 2$ and $r = -1$.\n',
+        keywords: ['inline', 'dollar', 'sentence', 'text', 'prose', '$'],
+        preview: true,
+      },
+      {
+        id: 'math-logic',
+        code: 'math a <=> b => c',
+        summary: 'Equivalence, implication, and the rest of the argument.',
+        detail:
+          '<=> is ⇔, => is ⇒, <== is ⇐, -> is →, |-> is ↦, != is ≠, <= and >= are ≤ and ≥, ~= is ≈. The words and, or, if, och, eller, om, då, där, för are set as words with room around them, and anything else in quotes is text: "for all" x.',
+        example: 'math x^2 = 4 <=> x = 2 or x = -2\nmath f: x |-> x^2\nmath x > 0 => sqrt(x^2) = x\n',
+        keywords: ['implies', 'iff', 'equivalent', 'arrow', 'logic', 'implikation', 'ekvivalens', 'or', 'and', 'text'],
+        preview: true,
+      },
+      {
+        id: 'math-sets',
+        code: 'math x in ]0, 1[',
+        summary: 'Sets, number systems and intervals.',
+        detail:
+          'RR, NN, ZZ, QQ, CC are ℝ, ℕ, ℤ, ℚ, ℂ. in, notin, sub, subeq, cup, cap and setminus are the set relations. Intervals are written with whatever brackets they have: [0, 1), (0, 1] and the ]0, 1[ used in Swedish texts all work. oo is ∞ and emptyset is ∅.',
+        example: 'math x in ]0, 1[ sub RR\nmath A = { x in RR : x^2 < 4 } = ]-2, 2[\nmath [0, oo) cup emptyset\n',
+        keywords: ['set', 'interval', 'real numbers', 'mängd', 'intervall', 'RR', 'infinity', 'oändlighet'],
+        preview: true,
+      },
+      {
+        id: 'math-functions',
+        code: 'math sin^2 x + cos^2 x = 1',
+        summary: 'sin, ln, arctan and the rest, set upright.',
+        detail:
+          'sin, cos, tan, cot, arcsin, arccos, arctan, sinh, cosh, tanh, ln, log, exp, max, min, sup, inf are printed the way they are in a book. They take brackets or not — sin x and sin(x) — a power before the argument, sin^2 x, and a base, log_2(x). Greek letters are written out: alpha, lambda, theta, pi, Omega.',
+        example: 'math sin^2 x + cos^2 x = 1\nmath log_2(8) = 3\nmath arctan x + arctan(1/x) = pi/2\n',
+        keywords: ['trigonometry', 'logarithm', 'ln', 'arctan', 'greek', 'lambda', 'theta', 'funktion'],
+        preview: true,
+      },
+      {
+        id: 'math-roots',
+        code: 'math sqrt(x), root(3, x), |x|',
+        summary: 'Roots, absolute values, binomials and factorials.',
+        detail:
+          'sqrt(x) and root(n, x) for the n-th root. |x| or abs(x) for the absolute value, with bars that grow with what is inside them. binom(n, k) is the binomial coefficient, n! a factorial, floor(x) and ceil(x) the integer parts. bar(z), hat(x), vec(v) and dot(x) put marks over a letter.',
+        example: 'math sqrt(x^2) = |x|\nmath binom(n, k) = n!/(k! (n - k)!)\nmath root(3, 27) = 3\n',
+        keywords: ['square root', 'root', 'absolute', 'belopp', 'binomial', 'factorial', 'fakultet', 'rot'],
+        preview: true,
+      },
+      {
+        id: 'math-limits',
+        code: 'math lim(x -> 0, sin(x)/x) = 1',
+        summary: 'A limit, written with its arrow underneath.',
+        detail:
+          'lim(x -> a, expression). A one-sided limit ends the arrow with a sign, x -> 0+ or x -> 0-, and a limit at infinity uses oo.',
+        example:
+          'math lim(x -> 0, sin(x)/x) = 1\nmath lim(x -> 0+, x ln x) = 0\nmath lim(n -> oo, (1 + 1/n)^n) = e\n',
+        keywords: ['limit', 'gränsvärde', 'lim', 'infinity', 'one-sided', 'standardgränsvärde'],
+        preview: true,
+      },
+      {
+        id: 'math-derivatives',
+        code: 'math diff(y, x) = 2x',
+        summary: 'Derivatives, with primes or in Leibniz notation.',
+        detail:
+          "y', f''(x) and so on for primes. diff(y, x) is dy/dx, diff(y, x, 2) the second derivative, and diff(x) on its own is the operator d/dx put in front of something.",
+        example: "math diff(y, x) = y'\nmath diff(y, x, 2) + y = 0\nmath diff(x) sin x = cos x\n",
+        keywords: ['derivative', 'derivata', 'leibniz', 'dy/dx', 'prime', 'differentiate'],
+        preview: true,
+      },
+      {
+        id: 'math-integrals',
+        code: 'math int(x^2, x, 0, 1) = 1/3',
+        summary: 'Integrals, and the bracket you evaluate afterwards.',
+        detail:
+          'int(f(x), x) is the indefinite integral, int(f(x), x, a, b) runs from a to b, and b may be oo for an improper integral. eval(F(x), a, b) is the [F(x)] from a to b written after finding a primitive.',
+        example:
+          'math int(x^2, x, 0, 1) = eval(x^3/3, 0, 1) = 1/3\nmath int(1/x, x) = ln|x| + C\nmath int(e^(-x), x, 0, oo) = 1\n',
+        keywords: ['integral', 'primitive', 'primitiv funktion', 'antiderivative', 'improper', 'generaliserad'],
+        preview: true,
+      },
+      {
+        id: 'math-sums',
+        code: 'math sum(k = 1, n, k) = n(n + 1)/2',
+        summary: 'Sums, series and products.',
+        detail:
+          'sum(k = 1, n, term) with the index, the upper limit and the term, and oo for a series. prod works the same way.',
+        example: 'math sum(k = 1, n, k) = n(n + 1)/2\nmath sum(k = 0, oo, x^k) = 1/(1 - x)\nmath prod(k = 1, n, k) = n!\n',
+        keywords: ['sum', 'series', 'serie', 'summa', 'geometric', 'product', 'sigma'],
+        preview: true,
+      },
+      {
+        id: 'math-ordo',
+        code: 'math e^x = 1 + x + ordo(x^2)',
+        summary: 'Big O, for Taylor expansions.',
+        detail:
+          'ordo(x^n) is the 𝒪(xⁿ) of a Taylor or Maclaurin expansion. Written out as ordo so that a function of your own called O is still a function.',
+        example: 'math sin x = x - x^3/6 + ordo(x^5)\nmath e^x = 1 + x + x^2/2 + ordo(x^3)\n',
+        keywords: ['ordo', 'big o', 'taylor', 'maclaurin', 'stora ordo'],
+        preview: true,
+      },
+    ],
+  },
   {
     id: 'units',
     title: 'Units and numbers',

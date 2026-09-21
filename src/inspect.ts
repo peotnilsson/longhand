@@ -1,4 +1,5 @@
 import { buildGraph, type Line } from './engine'
+import { splitInlineMath } from './engine/mathline'
 
 /**
  * Every symbol in a sheet, with what it holds and what it is tied to.
@@ -98,7 +99,15 @@ export function toMarkdown(title: string, lines: Line[]): string {
         break
       case 'prose':
       case 'note':
-        out.push(line.text, '')
+        out.push(
+          splitInlineMath(line.text)
+            .map((piece) => (piece.tex !== undefined ? `$${piece.tex}$` : piece.text))
+            .join(''),
+          '',
+        )
+        break
+      case 'math':
+        out.push('', `$$${line.tex}$$`, '')
         break
       case 'calc':
       case 'definition':
