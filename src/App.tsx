@@ -195,13 +195,21 @@ const Rendered = memo(function Rendered({
                 <tr key={index}>
                   {row.map((cell, cellIndex) => (
                     <td key={cellIndex} className={cell.verdict ?? ''}>
-                      {cell.verdict ? cell.text : <Quantity text={cell.text} />}
+                      {cell.verdict ? (
+                        <>
+                          {cell.text}
+                          {cell.margin && <span className="cell-margin">{cell.margin}</span>}
+                        </>
+                      ) : (
+                        <Quantity text={cell.text} />
+                      )}
                     </td>
                   ))}
                 </tr>
               ))}
             </tbody>
           </table>
+          {line.warning && <p className="warning table-warning">{line.warning}</p>}
         </div>
       )
 

@@ -2029,3 +2029,18 @@ body {
     display: none;
   }
 }
+
+/* A verdict column carries its own margin, the way a check line does. */
+.cell-margin {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.table-warning {
+  margin: 6px 0 0;
+  font-size: 12px;
+}

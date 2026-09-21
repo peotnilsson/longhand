@@ -213,10 +213,10 @@ export const REFERENCE: Section[] = [
         code: 'table … end',
         summary: 'One row per case, one column per quantity.',
         detail:
-          'The first row is the header. A header cell containing an = is a computed column: its formula runs for every row, using that row\'s own values. A computed column holding a comparison prints OK or NOT OK per row. Every column is formatted as a whole, so a column shares one unit, one notation and one number of decimals.',
+          'The first row is the header. A header cell containing an = is a computed column: its formula runs for every row, using that row\'s own values — so a row only gives values for the plain columns, in order, and the computed ones fill themselves in. A computed column holding a comparison prints OK or NOT OK per row with its margin underneath, "33.3% spare", worked out exactly as a check line would; there is no need for a margin column of your own. Every column is formatted as a whole, so a column shares one unit, one notation and one number of decimals. The block needs end on a line of its own after the last row — without it the table reads on into the lines below, and says so under the table.',
         example:
           'M_Ed = 250 kN*m\nf_ck = 30 MPa\n\ntable\n  section | bw     | hw     | Wt = bw*hw^2/6 | ok = M_Ed/Wt <= f_ck\n  A       | 300 mm | 500 mm\n  B       | 250 mm | 450 mm\nend\n',
-        keywords: ['table', 'rows', 'cases', 'sections', 'batch'],
+        keywords: ['table', 'rows', 'cases', 'sections', 'batch', 'margin', 'spare', 'utilisation', 'end'],
       },
       {
         id: 'named-table',

@@ -1662,6 +1662,51 @@ for (const [theme, width, height, tag] of [
     JSON.stringify(paragraphs))
 }
 
+// 52. typing end closes a table, and every row says how close it came
+{
+  await seedWith({ ...seed, projects: [{ ...seed.projects[0], sheets: [
+    { id: 's1', name: 'Rows', source: [
+      '# Rows',
+      'M_Ed = 250 kN*m',
+      'f_ck = 30 MPa',
+      'table',
+      '  section | bw     | hw     | Wt = bw*hw^2/6 | st = M_Ed/Wt | ok = st <= f_ck',
+      '  A       | 300 mm | 500 mm',
+      '  B       | 250 mm | 450 mm',
+      '  C       | 200 mm | 350 mm',
+      '',
+      '',
+      '// below the table',
+      'b_req = 200 mm',
+    ].join('\n') },
+  ] }], activeSheetId: 's1' })
+
+  const before = await page.$$eval('.sheet-table tbody tr', (rows) => rows.length)
+  const warned = await page.$('.table-warning')
+  check('a table with no end says so, instead of only filling cells with errors',
+    warned !== null && /end/.test(await warned.textContent()), `${before} rows`)
+
+  // Type the end the way a person does: one letter at a time, on the empty
+  // line under the last row. The header wraps in the editor, so arrowing down
+  // counts screen lines rather than source lines; put the cursor there directly.
+  // CodeMirror draws one .cm-line per source line however it wraps.
+  await page.locator('.cm-line').nth(8).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('end', { delay: 60 })
+  await page.waitForTimeout(700)
+
+  const sections = await page.$$eval('.sheet-table tbody tr', (rows) =>
+    rows.map((row) => row.children[0].textContent))
+  check('typing the last letter of end closes the table there and then',
+    JSON.stringify(sections) === '["A","B","C"]', JSON.stringify(sections))
+  check('and the warning goes with it', (await page.$('.table-warning')) === null)
+
+  const margins = await page.$$eval('.sheet-table .cell-margin', (els) => els.map((e) => e.textContent))
+  check('every verdict in the table carries its margin',
+    margins.length === 3 && margins[0] === '33.3% spare' && /over the limit/.test(margins[2]),
+    JSON.stringify(margins))
+}
+
 await browser.close()
 
 console.log('PASS:'); ok.forEach((l) => console.log('  ✓ ' + l))

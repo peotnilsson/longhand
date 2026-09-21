@@ -157,7 +157,7 @@ const errorGutter = (results: Line[]) =>
           message: result.message,
         })
       } else if (
-        (result.kind === 'calc' || result.kind === 'definition') &&
+        (result.kind === 'calc' || result.kind === 'definition' || result.kind === 'table') &&
         result.warning
       ) {
         diagnostics.push({

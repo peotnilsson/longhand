@@ -40,6 +40,10 @@ const escapeHtml = (text: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 
+/** A table cell as text, with a verdict's margin beside it. */
+const cellText = (cell: { text: string; margin?: string }): string =>
+  cell.margin ? `${cell.text} (${cell.margin})` : cell.text
+
 const SECTIONS = ['section', 'subsection', 'subsubsection', 'paragraph', 'paragraph', 'paragraph']
 
 /**
@@ -131,7 +135,7 @@ export function toLatex(title: string, lines: Line[], meta: DocumentMeta = {}): 
           '\\toprule',
           `${line.headers.map(escapeLatex).join(' & ')} \\\\`,
           '\\midrule',
-          ...line.rows.map((row) => `${row.map((cell) => escapeLatex(cell.text)).join(' & ')} \\\\`),
+          ...line.rows.map((row) => `${row.map((cell) => escapeLatex(cellText(cell))).join(' & ')} \\\\`),
           '\\bottomrule',
           '\\end{longtable}',
           '',
@@ -239,7 +243,7 @@ export function toWordHtml(
           '<table border="1" cellspacing="0" cellpadding="4">',
           `<tr>${line.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`,
           ...line.rows.map(
-            (row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell.text)}</td>`).join('')}</tr>`,
+            (row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cellText(cell))}</td>`).join('')}</tr>`,
           ),
           '</table>',
         )

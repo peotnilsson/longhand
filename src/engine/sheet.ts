@@ -50,6 +50,8 @@ export interface ToleranceView {
 export interface TableCell {
   text: string
   verdict?: 'pass' | 'fail'
+  /** For a verdict: "33.3% spare", worked out the same way as a check line. */
+  margin?: string
 }
 
 export interface PlotData {
@@ -97,7 +99,14 @@ export type Line =
     }
   | { kind: 'break' }
   | { kind: 'figure'; id: string; caption: string; number: number; summary: string }
-  | { kind: 'table'; headers: string[]; rows: TableCell[][]; summary: string }
+  | {
+      kind: 'table'
+      headers: string[]
+      rows: TableCell[][]
+      summary: string
+      /** Set when the block looks like it ran past where it was meant to end. */
+      warning?: string
+    }
   | { kind: 'plot'; data: PlotData; summary: string }
   | { kind: 'error'; source: string; message: string }
 
@@ -303,27 +312,7 @@ function evaluateStatement(
       const symbolic = `${toTex(leftNode, context.scope)} ${operator} ${toTex(rightNode, context.scope)}`
       const values = `${valueToTex(formatValue(left, precision), context.scope)} ${operator} ${valueToTex(formatLike(right, left, precision), context.scope)}`
 
-      let margin: string | null = null
-      try {
-        const ratio = Math.abs(math.number(math.divide(left as any, right as any) as any))
-        const op = (node as any).op
-        if (op === '<=' || op === '<') {
-          const percent = (1 - ratio) * 100
-          margin =
-            percent >= 0
-              ? `${percent.toFixed(1)}% spare`
-              : `${Math.abs(percent).toFixed(1)}% over the limit`
-        }
-        if (op === '>=' || op === '>') {
-          const percent = (ratio - 1) * 100
-          margin =
-            percent >= 0
-              ? `${percent.toFixed(1)}% above the minimum`
-              : `${Math.abs(percent).toFixed(1)}% short`
-        }
-      } catch {
-        /* incommensurable sides: no meaningful margin */
-      }
+      const margin = marginOf((node as any).op, left, right)
 
       const tex = sameTex(symbolic, values) ? symbolic : `${symbolic} = ${values}`
       const verdict = pass ? 'OK' : 'NOT OK'
@@ -564,7 +553,7 @@ function evaluateTable(
 
   type Cell =
     | { kind: 'value'; value: unknown }
-    | { kind: 'verdict'; pass: boolean }
+    | { kind: 'verdict'; pass: boolean; margin: string | null }
     | { kind: 'text'; text: string }
 
   // First pass: evaluate every cell, keeping the raw values so that each column
@@ -605,15 +594,26 @@ function evaluateTable(
         continue
       }
       try {
-        const value = elementwisePowers(
-          math.parse(expandRanges(column.expression!)),
-        ).evaluate(rowScope)
+        const parsed = elementwisePowers(math.parse(expandRanges(column.expression!)))
+        const value = parsed.evaluate(rowScope)
         rowScope[column.name] = value
-        row.push(
-          typeof value === 'boolean'
-            ? { kind: 'verdict', pass: value }
-            : { kind: 'value', value },
-        )
+        if (typeof value === 'boolean') {
+          // A verdict column is a check per row, and a check says how close
+          // it came. Without this the table said OK three times and left you
+          // to work out which row was nearly not.
+          let margin: string | null = null
+          if (parsed.type === 'OperatorNode' && COMPARISONS.has((parsed as any).op)) {
+            const [leftNode, rightNode] = (parsed as any).args
+            margin = marginOf(
+              (parsed as any).op,
+              leftNode.evaluate(rowScope),
+              rightNode.evaluate(rowScope),
+            )
+          }
+          row.push({ kind: 'verdict', pass: value, margin })
+        } else {
+          row.push({ kind: 'value', value })
+        }
       } catch (error) {
         row.push({ kind: 'text', text: explain(error, defined) })
       }
@@ -644,6 +644,7 @@ function evaluateTable(
         rows[rowIndex].push({
           text: cell.pass ? 'OK' : 'NOT OK',
           verdict: cell.pass ? 'pass' : 'fail',
+          ...(cell.margin ? { margin: cell.margin } : {}),
         })
         return
       }
@@ -1065,12 +1066,32 @@ function runLines(
       const named = splitNote(line).body.match(/^table\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/)
       const block: string[] = []
       let cursor = index + 1
+      // The first line inside the block that cannot be a row of it. A table
+      // with no `end` swallows everything down to the next one, and what that
+      // looked like was a wall of error messages in cells — with nothing
+      // saying the actual mistake was one missing word several lines up.
+      let stray: number | null = null
       while (cursor < lines.length && splitNote(lines[cursor].trim()).body !== 'end') {
         const row = splitNote(lines[cursor]).body
-        if (row !== '') block.push(row)
+        if (row !== '') {
+          const multiColumn = block.length > 0 && block[0].includes('|')
+          if (stray === null && ((multiColumn && !row.includes('|')) || /^\s*table\b/.test(row))) {
+            stray = cursor
+          }
+          block.push(row)
+        }
         cursor += 1
       }
       result = evaluateTable(block, context, options.precision, defined, named?.[1])
+      if (stray !== null && result.kind === 'table') {
+        result = {
+          ...result,
+          warning:
+            cursor >= lines.length
+              ? `This table never ends — line ${stray + 1} and everything after it were read as rows. Put \`end\` on its own line after the last row.`
+              : `Line ${stray + 1} does not look like a row of this table, so it was probably meant to end above it. Put \`end\` on its own line after the last row.`,
+        }
+      }
       results.push(result)
       snapshots?.push(cloneContext(context))
       for (let filler = index + 1; filler <= Math.min(cursor, lines.length - 1); filler += 1) {
@@ -1090,14 +1111,60 @@ function runLines(
   }
 }
 
-/** Index of the first line of the block containing `index`, for cache reuse. */
-function blockStart(lines: string[], index: number): number {
-  for (let cursor = index; cursor >= 0; cursor -= 1) {
-    const line = lines[cursor].trim()
-    if (/^table\b/.test(line)) return cursor
-    if (line === 'end') break
+/**
+ * How much room a comparison has, in words.
+ *
+ * Shared by a check on a line of its own and a verdict column in a table, so
+ * that "33.3% spare" means the same thing in both places. Null when the two
+ * sides cannot be divided — a check between a length and a pressure is
+ * already an error, and a margin between them would be nonsense.
+ */
+export function marginOf(op: string, left: unknown, right: unknown): string | null {
+  try {
+    const ratio = Math.abs(math.number(math.divide(left as any, right as any) as any))
+    if (!Number.isFinite(ratio)) return null
+    if (op === '<=' || op === '<') {
+      const percent = (1 - ratio) * 100
+      return percent >= 0
+        ? `${percent.toFixed(1)}% spare`
+        : `${Math.abs(percent).toFixed(1)}% over the limit`
+    }
+    if (op === '>=' || op === '>') {
+      const percent = (ratio - 1) * 100
+      return percent >= 0
+        ? `${percent.toFixed(1)}% above the minimum`
+        : `${Math.abs(percent).toFixed(1)}% short`
+    }
+  } catch {
+    /* incommensurable sides: no meaningful margin */
   }
-  return index
+  return null
+}
+
+/**
+ * Index of the first line of the block containing `index`, for cache reuse.
+ *
+ * This reads forward from the top, the same way `runLines` does, rather than
+ * backwards from the edit. Reading backwards got the one case that matters
+ * most wrong: typing the `d` of `end`. The line being edited *is* the `end`,
+ * so a backward scan stopped on it at once and reused the table above as it
+ * was a keystroke earlier — when it had no end and had swallowed every line
+ * down to the next one. The table stayed wrong until something above it
+ * changed. Only the text as it now stands can say which block a line is in.
+ */
+function blockStart(lines: string[], index: number): number {
+  let open = -1
+  for (let cursor = 0; cursor <= index && cursor < lines.length; cursor += 1) {
+    const line = lines[cursor].trim()
+    if (open === -1) {
+      if (/^table\b/.test(line)) open = cursor
+    } else if (splitNote(line).body === 'end') {
+      // The end line belongs to the block it closes.
+      if (cursor === index) return open
+      open = -1
+    }
+  }
+  return open === -1 ? index : open
 }
 
 interface Cache {

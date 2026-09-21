@@ -122,7 +122,7 @@ export function toMarkdown(title: string, lines: Line[]): string {
         out.push(`| ${line.headers.join(' | ')} |`)
         out.push(`| ${line.headers.map(() => '---').join(' | ')} |`)
         for (const row of line.rows) {
-          out.push(`| ${row.map((cell) => cell.text).join(' | ')} |`)
+          out.push(`| ${row.map((cell) => (cell.margin ? `${cell.text} (${cell.margin})` : cell.text)).join(' | ')} |`)
         }
         out.push('')
         break
