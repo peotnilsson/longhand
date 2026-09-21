@@ -404,8 +404,15 @@ export function integral(f: unknown, from: unknown, to: unknown, tolerance = 1e-
  */
 export function deriv(f: unknown, x: unknown): unknown {
   const fn = callable(f, 'deriv')
-  const step = math.multiply(x as any, 1e-6)
-  const stepped = isUnit(step) && ratio(step, x) === 0 ? math.multiply(x as any, 1e-6) : step
+  // A step proportional to x is zero at x = 0, and 0/0 is not a slope. At
+  // zero the step is a millionth of one of x's own units instead.
+  const proportional = math.multiply(x as any, 1e-6)
+  const atZero = math.equal(math.abs(x as any) as any, math.multiply(x as any, 0) as any) === true
+  const stepped = atZero
+    ? isUnit(x)
+      ? math.unit(1e-6, (x as any).formatUnits())
+      : 1e-6
+    : proportional
 
   const ahead = fn(math.add(x as any, stepped as any))
   const behind = fn(math.subtract(x as any, stepped as any))

@@ -244,6 +244,21 @@ export interface Solve2Setup {
 
 const ROUNDS2 = 60
 
+/**
+ * One of whatever `like` is measured in: 1 mm for a length, 1 for a number.
+ *
+ * Built from the value's units rather than by dividing the value by itself,
+ * which is the obvious way and gives 0/0 for exactly the case this exists for
+ * — a quantity that happens to be zero.
+ */
+function unitOneOf(like: unknown): unknown {
+  if (like && typeof like === 'object' && (like as any).type === 'Unit') {
+    const units = (like as any).formatUnits?.() as string | undefined
+    return units ? math.unit(1, units) : 1
+  }
+  return 1
+}
+
 export function solve2(
   request: Solve2Request,
   setup: Solve2Setup,
@@ -258,9 +273,24 @@ export function solve2(
     )
   }
 
+  // The unknowns are carried as multiples of a reference, which is what lets a
+  // length and a pressure be solved for together. A reference of zero cannot
+  // be a multiple of anything, so a variable that starts at zero is carried as
+  // a multiple of one of its own units instead, starting from nought.
+  const isZero = (value: unknown): boolean => {
+    try {
+      return math.equal(math.abs(value as any) as any, math.multiply(value as any, 0) as any) === true
+    } catch {
+      return false
+    }
+  }
+  const baseA = isZero(refA) ? unitOneOf(refA) : refA
+  const baseB = isZero(refB) ? unitOneOf(refB) : refB
+  const origin: [number, number] = [isZero(refA) ? 0 : 1, isZero(refB) ? 0 : 1]
+
   const quantities = (t: [number, number]): [unknown, unknown] => [
-    math.multiply(refA as any, t[0]),
-    math.multiply(refB as any, t[1]),
+    math.multiply(baseA as any, t[0]),
+    math.multiply(baseB as any, t[1]),
   ]
 
   /** Both residuals at a trial point, still carrying their own units. */
@@ -282,20 +312,16 @@ export function solve2(
 
   // Each residual is scaled by its own size at the starting point, so the two
   // equations weigh the same however differently they are measured.
-  const start = residuals([1, 1])
+  //
+  // An equation that already balances at the start has a size of zero, and
+  // dividing by that made every residual NaN — and because NaN is never
+  // greater than a tolerance, the solver "converged" at once and handed back
+  // the starting values as the answer. One of the residual's own units is the
+  // honest scale for that equation.
+  const start = residuals(origin)
   const scaleOf = (value: unknown): unknown => {
     try {
-      const size = math.abs(value as any)
-      const zero = math.multiply(size as any, 0)
-      if (math.equal(size as any, zero as any) === true) return math.add(size as any, unitOne(value))
-      return size
-    } catch {
-      return 1
-    }
-  }
-  const unitOne = (like: unknown): unknown => {
-    try {
-      return math.multiply(math.divide(like as any, like as any) as any, 1)
+      return isZero(value) ? unitOneOf(value) : math.abs(value as any)
     } catch {
       return 1
     }
@@ -317,7 +343,7 @@ export function solve2(
 
   const norm = (r: [number, number]): number => Math.hypot(r[0], r[1])
 
-  let t: [number, number] = [1, 1]
+  let t: [number, number] = [...origin]
   let r = plain(t)
 
   for (let round = 0; round < ROUNDS2 && norm(r) > 1e-12; round += 1) {
@@ -373,7 +399,9 @@ export function solve2(
     r = nextR
   }
 
-  if (norm(r) > 1e-6) {
+  // Written as "not within" rather than "beyond", so that NaN — which is
+  // neither — counts as the failure it is.
+  if (!(norm(r) <= 1e-6)) {
     throw new SolveError(
       `${request.variables.join(' and ')} did not converge — the two equations are still ` +
         'out by more than a millionth. Try starting from values closer to the answer.',
