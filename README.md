@@ -16,8 +16,6 @@ You need Node.js installed (nodejs.org, LTS version).
 npm install
 npm run dev     # http://localhost:5173 (landing), /app, /docs
 npm test        # the engine, store and documentation tests
-npm run build   # production build, what Vercel runs
-npm run verify  # the browser pass: build, run `npx vite preview --port 4173`, then this
 ```
 
 Five pages are built from one project: `index.html` is the landing page, `app.html` the
