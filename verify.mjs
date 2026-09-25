@@ -1577,7 +1577,7 @@ for (const [theme, width, height, tag] of [
   check('and the document is what fills the screen',
     (await phone.$eval('.editor-pane', (e) => getComputedStyle(e).display)) === 'none')
 
-  await phone.click('button:has-text("Show the working")')
+  await phone.click('button:has-text("Show what was typed")')
   await phone.waitForTimeout(300)
   check('the source is one tap away for a reviewer who wants it',
     (await phone.$eval('.editor-pane', (e) => getComputedStyle(e).display)) !== 'none')

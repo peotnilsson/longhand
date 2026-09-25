@@ -499,9 +499,19 @@ export const REFERENCE: Section[] = [
         code: 'math x in ]0, 1[',
         summary: 'Sets, number systems and intervals.',
         detail:
-          'RR, NN, ZZ, QQ, CC are ℝ, ℕ, ℤ, ℚ, ℂ. in, notin, sub, subeq, cup, cap and setminus are the set relations. Intervals are written with whatever brackets they have: [0, 1), (0, 1] and the ]0, 1[ used in Swedish texts all work. oo is ∞ and emptyset is ∅.',
+          'RR, NN, ZZ, QQ, CC are ℝ, ℕ, ℤ, ℚ, ℂ. in, notin, sub, subeq, cup (or union), cap, setminus, forall and exists are the set and logic relations. Intervals are written with whatever brackets they have: [0, 1), (0, 1] and the ]0, 1[ used in Swedish texts all work. oo is ∞ and emptyset is ∅.',
         example: 'math x in ]0, 1[ sub RR\nmath A = { x in RR : x^2 < 4 } = ]-2, 2[\nmath [0, oo) cup emptyset\n',
         keywords: ['set', 'interval', 'real numbers', 'mängd', 'intervall', 'RR', 'infinity', 'oändlighet'],
+        preview: true,
+      },
+      {
+        id: 'math-paste',
+        code: 'math σ ≤ f_yd',
+        summary: 'Paste the symbols themselves and they are read.',
+        detail:
+          'A line copied out of a lecture handout arrives with real mathematical characters in it, so those are what they look like: ≤ ≥ ≠ ≈ ≡, − × · ÷ ±, → ← ↦ ⇒ ⇔, ∈ ∉ ⊂ ⊆ ∪ ∩ ∖ ∅ ∀ ∃, ∞, √, °, m², f′(x), … and the Greek alphabet. Nothing has to be transliterated first, and there is no difference between a pasted ≤ and a typed <=. The same holds on lines that are computed, where 2 m × 3 and 10 µm work as written.',
+        example: 'math σ ≤ f_yd\nmath ∀ x ∈ ℝ: x² ≥ 0\nmath lim_(x → ∞) 1/x = 0\nmath √2 ≈ 1.414\n',
+        keywords: ['paste', 'unicode', 'copy', 'symbol', 'klistra in', 'tecken', 'grekiska', 'degree', 'grader'],
         preview: true,
       },
       {
@@ -605,6 +615,14 @@ export const REFERENCE: Section[] = [
       {
         heading: 'Constants without looking them up',
         text: 'Write `import "Constants"` for g_n, the gas constant, Stefan–Boltzmann, the standard atmosphere and the rest — exact, because since 2019 they are defined rather than measured — plus nominal densities and elastic moduli. There are deliberately no partial safety factors in it: those depend on the code, the national annex and the design situation, and a stale one sitting in a shared sheet is invisible. Write those in the sheet that uses them, where a checker can see them.',
+      },
+      {
+        heading: 'Paste from a document and it still works',
+        text: 'A calculation is usually copied out of something typeset — a lecture PDF, a Word document, a message — so what arrives is not the characters a keyboard makes. A minus sign that is not a hyphen (2 − 1), a multiplication sign (2 × 3), a middle dot, a non-breaking space between a number and its unit, a squared metre written m², a micro sign in 10 µm, 45° and 20 °C, ≤ and ≥ in a check, ± before a tolerance, curly quotes, and 2**3 from a spreadsheet: each of those has exactly one sensible reading, and it is read that way. Quoted text is left exactly as typed, because those are your words.',
+      },
+      {
+        heading: 'The two that have to be written out',
+        text: 'A decimal comma and a space inside a long number are the two cases where guessing would be worse than asking, because 1,5 and max(1,5) cannot be told apart and neither can 1 000 and two numbers side by side. Write 1.5 and 1000 — or 1e3 — and the line says so if you forget.',
       },
       {
         heading: 'Symbols read as maths',
@@ -792,7 +810,14 @@ export const REFERENCE: Section[] = [
           'Renaming a symbol across two hundred lines is find and replace, and until there was one the only option was to do it by eye. The Symbols panel answers the other half of the same question: click a name there to jump to the line that defines it, and the names in its dependency list jump too.',
         keywords: ['find', 'search', 'replace', 'rename', 'jump to definition'],
       },
-      { id: 'k-new', code: 'Alt + N', summary: 'New sheet in this project.' },
+      {
+        id: 'k-new',
+        code: 'Alt + N',
+        summary: 'New sheet in this project. On a Mac, Control + Option + N.',
+        detail:
+          'The shortcuts below use Alt on Windows and Linux, and Control + Option on a Mac — where Option on its own is how you type π, ß and ≤, so it cannot be a shortcut. Everything they do is also in the ⌘K palette, which is the same on every machine.',
+        keywords: ['alt', 'option', 'control', 'mac', 'shortcut', 'genväg'],
+      },
       { id: 'k-move', code: 'Alt + [ / ]', summary: 'Previous / next sheet.' },
       { id: 'k-panels', code: 'Alt + P / H / ,', summary: 'Project, Help, Settings.' },
       { id: 'k-share', code: 'Alt + S', summary: 'Share this sheet as a link.' },

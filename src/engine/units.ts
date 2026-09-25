@@ -357,7 +357,12 @@ export function formatColumn(values: unknown[], precision: number): string[] {
   const magnitudes = numbers.filter((n) => Number.isFinite(n) && n !== 0).map(Math.abs)
   const largest = magnitudes.length ? Math.max(...magnitudes) : 0
   const smallest = magnitudes.length ? Math.min(...magnitudes) : 0
-  const exponential = largest >= 1e5 || (smallest > 0 && smallest < 1e-3)
+  // A column is written in powers of ten when its numbers are large, small,
+  // or — the case that used to print 0.002 as a flat "0" — so far apart that
+  // no single number of decimals can show both ends of it.
+  const span = smallest > 0 ? largest / smallest : 1
+  const exponential =
+    largest >= 1e5 || (smallest > 0 && smallest < 1e-3) || span >= 10 ** Math.max(precision, 4)
 
   // One decimal count for the whole column, taken from its largest value, so
   // the decimal points line up: 20.00 / 29.63 / 61.22, never 20 / 29.63 / 61.224.
@@ -368,11 +373,12 @@ export function formatColumn(values: unknown[], precision: number): string[] {
   const allIntegers = numbers.every(
     (n) => !Number.isFinite(n) || Math.abs(n - Math.round(n)) <= Math.abs(n) * 1e-10,
   )
-  const decimals = allIntegers
-    ? 0
-    : largest > 0
-      ? Math.max(0, precision - 1 - Math.floor(Math.log10(largest)))
-      : precision - 1
+  // Enough decimals for the largest value to carry its significant figures,
+  // and never so few that the smallest one rounds away to nothing: a column
+  // holding 1000 and 0.002 is written to three decimals, not to none.
+  const forLargest = largest > 0 ? Math.max(0, precision - 1 - Math.floor(Math.log10(largest))) : precision - 1
+  const forSmallest = smallest > 0 ? Math.max(0, -Math.floor(Math.log10(smallest))) : 0
+  const decimals = allIntegers ? 0 : Math.min(10, Math.max(forLargest, forSmallest))
 
   return values.map((value, index) => {
     const n = numbers[index]

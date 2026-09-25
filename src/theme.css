@@ -31,6 +31,9 @@
   --syn-string: #a3341f;
   --syn-operator: #6b6b66;
   --syn-variable: #14396b;
+  /* The keyboard-focus ring: dark enough to read on paper-white, and the
+     same hue in both themes so it never looks like an error. */
+  --focus: #1b5fb0;
 }
 
 /* Dark is the same document in a dimmer room: same hierarchy, same restraint. */
@@ -62,6 +65,7 @@
     --syn-string: #e3907c;
     --syn-operator: #a8a49c;
     --syn-variable: #9cdcfe;
+    --focus: #7ab3f0;
   }
 }
 
@@ -92,6 +96,7 @@
   --syn-string: #e3907c;
   --syn-operator: #a8a49c;
   --syn-variable: #9cdcfe;
+  --focus: #7ab3f0;
 }
 
 * {

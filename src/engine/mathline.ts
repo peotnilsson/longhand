@@ -20,6 +20,8 @@
  * the things a written solution is made of.
  */
 
+import { normaliseForTypesetting } from './source'
+
 export class MathSyntaxError extends Error {}
 
 // ---------------------------------------------------------------- tokens
@@ -111,6 +113,12 @@ const CONSTANTS: Record<string, string> = {
   CC: '\\mathbb{C}',
   emptyset: '\\emptyset',
   dots: '\\dots',
+  infinity: '\\infty',
+  forall: '\\forall',
+  exists: '\\exists',
+  circ: '\\circ',
+  partial: '\\partial',
+  nabla: '\\nabla',
 }
 
 /** Written between the halves of a statement: "x = 2 or x = -1". */
@@ -143,7 +151,11 @@ const RELATIONS: Record<string, string> = {
   subeq: '\\subseteq',
   sube: '\\subseteq',
   cup: '\\cup',
+  union: '\\cup',
   cap: '\\cap',
+  inter: '\\cap',
+  supset: '\\supset',
+  propto: '\\propto',
   setminus: '\\setminus',
   approx: '\\approx',
   sim: '\\sim',
@@ -674,7 +686,7 @@ class Parser {
 
 /** One statement as TeX. Throws MathSyntaxError with a message a person can act on. */
 export function mathToTex(source: string): string {
-  const parser = new Parser(tokenize(source))
+  const parser = new Parser(tokenize(normaliseForTypesetting(source)))
   const tex = parser.statement()
   if (!parser.done()) {
     throw new MathSyntaxError('Something is left over at the end — a bracket closed too many times?')
@@ -692,7 +704,7 @@ export function mathToTex(source: string): string {
  */
 export function alignToTex(rows: string[]): string {
   const lines = rows.map((row) => {
-    const parser = new Parser(tokenize(row))
+    const parser = new Parser(tokenize(normaliseForTypesetting(row)))
     const { parts, firstRelation } = parser.statementParts()
     if (!parser.done()) {
       throw new MathSyntaxError('Something is left over at the end — a bracket closed too many times?')

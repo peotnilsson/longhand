@@ -15,6 +15,7 @@
  * is parsed, so everything downstream — substitution, the dependency graph, the
  * solver — sees an ordinary function call and needs to know nothing about it.
  */
+import { math } from './units'
 
 const OPERAND = String.raw`(\([^()]*\)|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?|\d+(?:\.\d+)?)`
 
@@ -86,25 +87,37 @@ export function range(start: unknown, end: unknown, step: unknown = 1): number[]
 }
 
 /**
- * Make `^` element-wise.
+ * Make `^` mean what it looks like, for lists as well as numbers.
  *
  * mathjs reads `d^2` on a list as matrix exponentiation, which needs a square
- * matrix and so fails on every vector an engineer would write. A calculation
- * sheet has no use for a matrix power, and `A(d) = pi*d^2/4` applied down a
- * list of diameters is an obvious thing to want, so `^` is rewritten to `.^`
- * before evaluation. On plain numbers the two are the same operation.
+ * matrix and so fails on every vector an engineer would write, while
+ * `A(d) = pi*d^2/4` applied down a list of diameters is an obvious thing to
+ * want. So `^` is evaluated through a helper that decides at the moment it
+ * has the value in hand: element by element for a list, and a real matrix
+ * power for a matrix — which used to be silently element-wise too, so
+ * `[1,2;3,4]^2` gave [1,4;9,16] under a typeset M².
  *
  * Only the tree that gets evaluated is rewritten. The formula is rendered from
- * the tree as it was written, so the page still shows d², not d.^2.
+ * the tree as it was written, so the page still shows d², not power(d, 2).
  */
 export function elementwisePowers(node: any): any {
   return node.transform((n: any) => {
-    if (n.isOperatorNode && n.op === '^') {
-      const rewritten = n.clone()
-      rewritten.op = '.^'
-      rewritten.fn = 'dotPow'
-      return rewritten
+    if (n.isOperatorNode && n.op === '^' && n.args.length === 2) {
+      return new (math as any).FunctionNode(new (math as any).SymbolNode(POWER), [
+        elementwisePowers(n.args[0]),
+        elementwisePowers(n.args[1]),
+      ])
     }
     return n
   })
+}
+
+/** The name the rewritten `^` calls. Underscored so a sheet cannot shadow it. */
+export const POWER = '__power'
+
+/** Element by element for a list, a true matrix power for a matrix. */
+export function power(base: unknown, exponent: unknown): unknown {
+  const rows = Array.isArray(base) ? base : (base as any)?.isMatrix ? (base as any).toArray() : null
+  const isMatrix = Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0])
+  return isMatrix ? (math as any).pow(base, exponent) : (math as any).dotPow(base, exponent)
 }

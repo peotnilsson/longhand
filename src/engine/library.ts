@@ -1,6 +1,5 @@
-import { create, all } from 'mathjs'
+import { math } from './units'
 
-const math = create(all)
 
 /**
  * The functions an engineering sheet needs that mathjs does not have, or does

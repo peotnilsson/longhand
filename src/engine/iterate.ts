@@ -1,6 +1,5 @@
-import { create, all } from 'mathjs'
+import { math } from './units'
 
-const math = create(all)
 
 /**
  * `f = iterate step(f) from 0.02`

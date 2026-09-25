@@ -2201,3 +2201,33 @@ body {
     display: none !important;
   }
 }
+
+/* ------------------------------------------------- where the keyboard is
+
+   Twenty-one of forty tab stops had nothing to show for themselves: the
+   browser's own ring was overridden here and there, and the rest relied on a
+   default that our own backgrounds swallow. One ring, everywhere, and only
+   for the keyboard — :focus-visible leaves a clicked button alone. */
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+.sheet-name:focus-visible,
+.panel input:focus-visible,
+.panel select:focus-visible,
+.commands-query:focus-visible,
+.link-box:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* The editor draws its own cursor and its own active line; a ring around the
+   whole of it while you type would be a box round the page. */
+.cm-editor:focus-visible,
+.cm-content:focus-visible,
+.cm-editor .cm-scroller:focus-visible {
+  outline: none;
+}

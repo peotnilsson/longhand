@@ -4,7 +4,6 @@ import 'katex/dist/katex.min.css'
 import { EditorView } from '@codemirror/view'
 import {
   evaluateSheet,
-  recomputeCold,
   sheetTitle,
   type ColdRun,
   type Line,
@@ -48,11 +47,18 @@ import { inspect, downstream, toMarkdown, tableFromPaste } from './inspect'
 import { summariseChecks, tightest, verdictLine, type SheetChecks } from './checks'
 import { DISCLAIMER, buildStamp } from './build'
 import { ISSUES_URL, issueUrl, mailtoUrl, optedOut, setOptedOut, start, track, trackOnce } from './analytics'
-import { LONG_LINK, importedNames, shareLink, sheetFromLocation, type SharedSheet } from './share'
+import {
+  LONG_LINK,
+  importedNames,
+  payloadFromHash,
+  shareLink,
+  sheetFromLocation,
+  type SharedSheet,
+} from './share'
 import { describeDiff, diffLines, withContext } from './diff'
 import { toLatex, toWordHtml, type DocumentMeta } from './export'
 import { CommandPalette, type Command } from './Commands'
-import { useEvaluation } from './evaluator'
+import { recheck, useEvaluation } from './evaluator'
 import { splitInlineMath } from './engine/mathline'
 import {
   checkSignature,
@@ -421,11 +427,17 @@ function useSignatureState(source: string, signature?: Signature): SignatureStat
   return state
 }
 
+const onAMac = (): boolean =>
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent)
+
 /** ⌘ on a Mac, Ctrl everywhere else — written the way the keyboard is labelled. */
-function modifierKey(): string {
-  if (typeof navigator === 'undefined') return 'Ctrl+'
-  return /Mac|iPhone|iPad/.test(navigator.userAgent) ? '\u2318' : 'Ctrl+'
-}
+const modifierKey = (): string => (onAMac() ? '\u2318' : 'Ctrl+')
+
+/**
+ * The second modifier, for the shortcuts that are not on ⌘: Control+Option on
+ * a Mac, because bare Option there is how you type a character.
+ */
+const altKey = (): string => (onAMac() ? '\u2303\u2325' : 'Alt+')
 
 /**
  * A toolbar button that opens a short menu.
@@ -476,6 +488,68 @@ function ToolbarMenu({
       {open && <div className="menu">{children(() => setOpen(false))}</div>}
     </div>
   )
+}
+
+/**
+ * True when the only difference between two stores is the text of sheets.
+ *
+ * Deliberately by identity rather than by value: React gives a new object for
+ * whatever changed and keeps the rest, so this costs a handful of comparisons
+ * and never walks a figure's data URL.
+ */
+function onlyTextChanged(before: Store | null, after: Store): boolean {
+  if (!before) return false
+  if (
+    before.activeProjectId !== after.activeProjectId ||
+    before.activeSheetId !== after.activeSheetId ||
+    before.precision !== after.precision ||
+    before.mode !== after.mode ||
+    before.settings !== after.settings ||
+    before.lastBackupAt !== after.lastBackupAt ||
+    before.projects.length !== after.projects.length
+  ) {
+    return false
+  }
+  return before.projects.every((project, index) => {
+    const now = after.projects[index]
+    if (project === now) return true
+    if (project.id !== now.id || project.name !== now.name || project.meta !== now.meta) return false
+    if (project.sheets.length !== now.sheets.length) return false
+    return project.sheets.every((sheet, at) => {
+      const sheetNow = now.sheets[at]
+      return (
+        sheet === sheetNow ||
+        (sheet.id === sheetNow.id &&
+          sheet.name === sheetNow.name &&
+          sheet.figures === sheetNow.figures &&
+          sheet.revisions === sheetNow.revisions &&
+          sheet.signature === sheetNow.signature)
+      )
+    })
+  })
+}
+
+/**
+ * Whether the app is in its narrow, phone layout.
+ *
+ * Used for the one thing CSS cannot express: a drawer that is off screen has
+ * to be out of the tab order too, or a keyboard walks through every project,
+ * every sheet and the Delete button without anything visible moving.
+ */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches,
+  )
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)')
+    const update = (event: MediaQueryListEvent) => setNarrow(event.matches)
+    query.addEventListener('change', update)
+    setNarrow(query.matches)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  return narrow
 }
 
 /**
@@ -852,7 +926,7 @@ function SharedView({
         </span>
         <div className="shared-actions">
           <button className="toolbar-link source-toggle" onClick={() => setReading(!reading)}>
-            {reading ? 'Show the working' : 'Hide the working'}
+            {reading ? 'Show what was typed' : 'Hide what was typed'}
           </button>
           <button className="primary" onClick={onCopy}>
             Make a copy to edit
@@ -917,20 +991,57 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null)
   const [signedBy, setSignedBy] = useState('')
   const [commanding, setCommanding] = useState(false)
+  const [brokenLink, setBrokenLink] = useState(false)
   // On a phone the sidebar is a drawer, and the screen is split between the
   // document above and the source below. The split is the reader's to move.
   const [drawer, setDrawer] = useState(false)
   const [split, setSplit] = useState(48)
   const appRef = useRef<HTMLDivElement>(null)
   const online = useOnline()
+  const narrow = useNarrow()
   const outputRef = useRef<HTMLDivElement>(null)
   const pagedRef = useRef<HTMLDivElement>(null)
+  const saved = useRef<Store | null>(null)
   const backupInput = useRef<HTMLInputElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  /**
+   * Keep the work, without serialising it on every keystroke.
+   *
+   * The whole store goes into localStorage as one JSON string, and it carries
+   * every project, every revision and every figure — a sketch is a base64
+   * data URL of up to 700 kB. Writing all of that on each keypress puts
+   * megabytes of stringify back on the thread the editor runs on, which is
+   * the thing moving evaluation into a worker was for. A third of a second of
+   * settling is imperceptible to a person typing, and the write is flushed
+   * the moment the tab is hidden or closed, so nothing is ever lost.
+   */
   useEffect(() => {
-    const result = saveStore(store)
-    setSaveFailure(result.ok ? null : result.reason)
+    const keep = () => {
+      saved.current = store
+      const result = saveStore(store)
+      setSaveFailure(result.ok ? null : result.reason)
+    }
+    // Only typing waits. Anything with a shape to it — a sheet added, moved,
+    // renamed or deleted, a setting changed — is written at once, because
+    // those are the changes a person would be upset to lose and they happen
+    // once in a while rather than thirty times a second.
+    if (!onlyTextChanged(saved.current, store)) {
+      keep()
+      return
+    }
+    const timer = window.setTimeout(keep, 300)
+    const flush = () => {
+      window.clearTimeout(timer)
+      keep()
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', flush)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', flush)
+    }
   }, [store])
 
   // One pageview per load, carrying nothing but a four-word return bucket.
@@ -946,9 +1057,14 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     const read = () => {
+      const carried = payloadFromHash(window.location.hash) !== null
       void sheetFromLocation().then((found) => {
         if (cancelled) return
         setShared(found)
+        // A link that carried a sheet but could not be read is a link that
+        // was damaged on the way — mail clients wrap long ones. Saying so
+        // beats opening the reader's own sheets as though nothing happened.
+        setBrokenLink(carried && !found)
         if (found) track('share opened')
       })
     }
@@ -1069,6 +1185,12 @@ export default function App() {
   const project = activeProject(store)
   const sheet = activeSheet(store)
   const activeSignature = useSignatureState(sheet.source, sheet.signature)
+
+  // A link belongs to the sheet it was made from, so switching sheets throws
+  // it away rather than offering the last one under a new name.
+  useEffect(() => {
+    setLink(null)
+  }, [sheet.id])
 
   // Every other sheet in the project is importable by name.
   const libraries = useMemo(() => {
@@ -1506,13 +1628,12 @@ export default function App() {
    * should be able to prove it did not, without taking our word for it.
    */
   const recalculate = () => {
-    setCold(
-      recomputeCold(sheet.source, {
-        precision: store.precision,
-        mode: store.mode,
-        libraries,
-      }),
-    )
+    setCold(null)
+    void recheck(sheet.source, {
+      precision: store.precision,
+      mode: store.mode,
+      libraries,
+    }).then(setCold)
     track('recalculated')
   }
 
@@ -1753,7 +1874,12 @@ export default function App() {
         return
       }
 
-      if (!event.altKey || event.metaKey || event.ctrlKey) return
+      // Option is how a Mac types π, ß, ≤ and a dead tilde, so bare Option
+      // cannot be a shortcut there: it ate the character and opened a panel
+      // instead, in the editor and in every text field. On a Mac the same
+      // shortcuts are on Control+Option; everywhere else Alt is free.
+      if (!event.altKey || event.metaKey) return
+      if (onAMac() ? !event.ctrlKey : event.ctrlKey) return
 
       const step = (offset: number) => {
         const sheets = project.sheets
@@ -1868,7 +1994,7 @@ export default function App() {
             activeSheetId: candidate.sheets[0].id,
           })),
       })),
-    { id: 'new-sheet', label: 'New sheet', group: 'Make', hint: 'Alt+N', run: () => addSheet() },
+    { id: 'new-sheet', label: 'New sheet', group: 'Make', hint: `${altKey()}N`, run: () => addSheet() },
     { id: 'new-project', label: 'New project', group: 'Make', run: addProject },
     { id: 'duplicate', label: 'Duplicate this sheet', group: 'Make', run: duplicateSheet },
     {
@@ -1887,7 +2013,7 @@ export default function App() {
       id: 'print',
       label: 'Print this sheet',
       group: 'Send',
-      hint: 'Cmd+P',
+      hint: `${modifierKey()}P`,
       run: () => {
         track('sheet printed')
         window.print()
@@ -1903,13 +2029,13 @@ export default function App() {
       id: 'share',
       label: 'Share this sheet as a link',
       group: 'Send',
-      hint: 'Alt+S',
+      hint: `${altKey()}S`,
       run: () => {
         setLink(null)
         setPanel('share')
       },
     },
-    { id: 'save', label: 'Save to a file', group: 'Send', hint: 'Cmd+S', run: save },
+    { id: 'save', label: 'Save to a file', group: 'Send', hint: `${modifierKey()}S`, run: save },
     { id: 'open', label: 'Open a file', group: 'Send', run: () => fileInput.current?.click() },
     { id: 'pdf', label: 'Save as PDF', group: 'Send', run: saveAsPdf },
     { id: 'word', label: 'Export for Word', group: 'Send', run: exportWord },
@@ -1926,7 +2052,7 @@ export default function App() {
       id: 'symbols',
       label: 'Symbols — every name and what depends on it',
       group: 'Check',
-      hint: 'Alt+Y',
+      hint: `${altKey()}Y`,
       run: () => {
         setTraced(null)
         setPanel('symbols')
@@ -1936,28 +2062,28 @@ export default function App() {
       id: 'history',
       label: 'History and revisions',
       group: 'Check',
-      hint: 'Alt+R',
+      hint: `${altKey()}R`,
       run: () => setPanel('history'),
     },
     {
       id: 'meta',
       label: 'Project settings and title block',
       group: 'Open',
-      hint: 'Alt+P',
+      hint: `${altKey()}P`,
       run: () => setPanel('meta'),
     },
     {
       id: 'settings',
       label: 'Settings',
       group: 'Open',
-      hint: 'Alt+,',
+      hint: `${altKey()},`,
       run: () => setPanel('settings'),
     },
     {
       id: 'help',
       label: 'Help and the language reference',
       group: 'Open',
-      hint: 'Alt+H',
+      hint: `${altKey()}H`,
       run: () => window.open('/docs', '_blank', 'noreferrer'),
     },
     {
@@ -1989,13 +2115,23 @@ export default function App() {
           app's side menu works, and the thing that was missing when the
           project list simply sat on top of half the screen. */}
       <div className="drawer-backdrop no-print" onClick={() => setDrawer(false)} aria-hidden="true" />
+      {brokenLink && (
+        <div className="save-alert no-print" role="alert">
+          <strong>That shared link is damaged.</strong> The calculation travels inside the link
+          itself, and this one arrived incomplete — mail clients and chat apps wrap long links.
+          Ask for it again as a file, or paste the whole link into the address bar by hand.
+          <button onClick={() => setBrokenLink(false)}>Dismiss</button>
+        </div>
+      )}
+
       {saveFailure && (
-        <div className="save-alert no-print">
+        <div className="save-alert no-print" role="alert">
           <strong>Not saving.</strong>{' '}
           {saveFailure === 'quota'
             ? 'This browser has run out of storage for Longhand. Export a backup now, then delete a project you no longer need.'
             : 'This browser is blocking storage, so nothing you type is being kept. Export a backup before you close the tab.'}
           <button onClick={exportAll}>Export backup</button>
+          <button onClick={() => setSaveFailure(null)}>Dismiss</button>
         </div>
       )}
 
@@ -2018,14 +2154,14 @@ export default function App() {
         <CommandPalette commands={commands} onClose={() => setCommanding(false)} />
       )}
 
-      <aside className="sheets">
+      <aside className="sheets" inert={narrow && !drawer}>
         <div className="sheets-head">
           <a className="brand" href="/" title="Longhand">
             <Mark size={17} />
             Longhand
           </a>
-          <button className="icon" onClick={addProject} title="New project">
-            +
+          <button className="icon" onClick={addProject} title="New project" aria-label="New project">
+            <span aria-hidden="true">+</span>
           </button>
         </div>
 
@@ -2091,7 +2227,7 @@ export default function App() {
           <button
             onClick={() => reorder(-1)}
             disabled={project.sheets.findIndex((s) => s.id === sheet.id) === 0}
-            title="Move sheet up"
+            title="Move sheet up" aria-label="Move sheet up"
           >
             ↑
           </button>
@@ -2100,7 +2236,7 @@ export default function App() {
             disabled={
               project.sheets.findIndex((s) => s.id === sheet.id) === project.sheets.length - 1
             }
-            title="Move sheet down"
+            title="Move sheet down" aria-label="Move sheet down"
           >
             ↓
           </button>
@@ -2121,8 +2257,23 @@ export default function App() {
         <div
           className="split-handle no-print"
           role="separator"
+          tabIndex={narrow ? 0 : -1}
           aria-orientation="horizontal"
-          aria-label="Drag to resize"
+          aria-label="How much of the screen the document gets"
+          aria-valuenow={Math.round(split)}
+          aria-valuemin={12}
+          aria-valuemax={85}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 10 : 4
+            const move = (by: number) => {
+              event.preventDefault()
+              setSplit((current) => Math.min(85, Math.max(12, current + by)))
+            }
+            if (event.key === 'ArrowUp') move(-step)
+            else if (event.key === 'ArrowDown') move(step)
+            else if (event.key === 'Home') move(-100)
+            else if (event.key === 'End') move(100)
+          }}
           onPointerDown={(event) => {
             const box = appRef.current?.getBoundingClientRect()
             if (!box) return
@@ -2131,12 +2282,16 @@ export default function App() {
               const percent = ((moveEvent.clientY - box.top) / box.height) * 100
               setSplit(Math.min(85, Math.max(12, percent)))
             }
-            const up = () => {
+            // pointercancel as well as pointerup: a drag interrupted by the
+            // system used to leave the split following the finger for ever.
+            const stop = () => {
               window.removeEventListener('pointermove', move)
-              window.removeEventListener('pointerup', up)
+              window.removeEventListener('pointerup', stop)
+              window.removeEventListener('pointercancel', stop)
             }
             window.addEventListener('pointermove', move)
-            window.addEventListener('pointerup', up)
+            window.addEventListener('pointerup', stop)
+            window.addEventListener('pointercancel', stop)
           }}
         />
         <div className="toolbar">
@@ -2317,7 +2472,12 @@ export default function App() {
             </ToolbarMenu>
             {/* The palette is the answer to "where did the button go", so it
                 has to be visible rather than folklore. */}
-            <button className="kbd-hint" onClick={() => setCommanding(true)} title="Everything the app can do">
+            <button
+              className="kbd-hint"
+              onClick={() => setCommanding(true)}
+              title="Everything the app can do"
+              aria-label="Commands"
+            >
               {modifierKey()}K
             </button>
           </div>
@@ -2747,7 +2907,6 @@ export default function App() {
                 <button onClick={exportLatex}>Export as LaTeX</button>
                 <button onClick={pasteTable}>Paste a spreadsheet range</button>
               </div>
-              {figureError && <p className="warning">{figureError}</p>}
             </section>
           </div>
         )}
@@ -3017,10 +3176,16 @@ export default function App() {
           </div>
         )}
 
-        {importError && (
-          <p className="warning import-warning no-print">
-            {importError}{' '}
-            <button className="jump" onClick={() => setImportError(null)}>
+        {(importError || figureError) && (
+          <p className="warning import-warning no-print" role="status">
+            {importError ?? figureError}{' '}
+            <button
+              className="jump"
+              onClick={() => {
+                setImportError(null)
+                setFigureError(null)
+              }}
+            >
               Dismiss
             </button>
           </p>

@@ -57,8 +57,34 @@ export function defineUnit({ name, definition }: UnitDefinition): string {
     throw new Error(`a unit has to be defined as a quantity with units — "${definition}" has none`)
   }
 
+  // A unit already known to mathjs is a different matter, because defining
+  // one is global and permanent: it changes every sheet in this browser until
+  // the tab is reloaded. `unit m = 1 m` used to take metres apart and leave
+  // every length in every project reading "Undefined symbol mm" — with an
+  // error pointing at this line rather than at the damage.
+  //
+  // So: a definition that restates what the name already means is accepted
+  // and changes nothing, and one that would change it is refused by name.
+  let existing: unknown = null
   try {
-    ;(math as any).createUnit(name, { definition }, { override: true })
+    existing = math.evaluate(`1 ${name}`)
+  } catch {
+    /* not a unit yet, which is the ordinary case */
+  }
+  if (isUnitValue(existing)) {
+    try {
+      if (math.equal(existing as any, sample as any) === true) return `${name} = ${definition}`
+    } catch {
+      /* different kinds of quantity: definitely a change */
+    }
+    throw new Error(
+      `${name} already means ${(existing as any).toString()} everywhere in Longhand, and redefining ` +
+        'it would change every sheet in this browser. Choose another name.',
+    )
+  }
+
+  try {
+    ;(math as any).createUnit(name, { definition })
   } catch (error) {
     throw new Error(
       `${name} could not be defined: ${error instanceof Error ? error.message : String(error)}`,

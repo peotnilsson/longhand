@@ -44,12 +44,18 @@ export function CommandPalette({
   const [at, setAt] = useState(0)
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLUListElement>(null)
+  // Where the keyboard was before this opened, so closing puts it back.
+  const cameFrom = useRef<HTMLElement | null>(
+    typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null),
+  )
 
   const shown = useMemo(() => filterCommands(commands, query), [commands, query])
   const selected = Math.min(at, Math.max(0, shown.length - 1))
 
   useEffect(() => {
     input.current?.focus()
+    const previous = cameFrom.current
+    return () => previous?.focus?.()
   }, [])
 
   // Keep the highlighted row in view when arrowing past the fold.
@@ -68,15 +74,23 @@ export function CommandPalette({
       <div
         className="commands"
         role="dialog"
+        aria-modal="true"
         aria-label="Commands"
         onMouseDown={(event) => event.stopPropagation()}
       >
+        {/* A combobox over a listbox, so that arrowing through the list says
+            what is selected rather than moving a highlight in silence. */}
         <input
           ref={input}
           className="commands-query"
           value={query}
           placeholder="What do you want to do?"
           aria-label="Search commands"
+          role="combobox"
+          aria-expanded={shown.length > 0}
+          aria-controls="command-list"
+          aria-autocomplete="list"
+          aria-activedescendant={shown[selected] ? `command-${shown[selected].id}` : undefined}
           onChange={(event) => {
             setQuery(event.target.value)
             setAt(0)
@@ -94,16 +108,29 @@ export function CommandPalette({
             } else if (event.key === 'Escape') {
               event.preventDefault()
               onClose()
+            } else if (event.key === 'Tab') {
+              // Nothing behind this is reachable while it is open: Tab walks
+              // the list rather than wandering into the page underneath.
+              event.preventDefault()
+              setAt((current) =>
+                event.shiftKey
+                  ? Math.max(current - 1, 0)
+                  : Math.min(current + 1, shown.length - 1),
+              )
             }
           }}
         />
         {shown.length === 0 ? (
           <p className="commands-empty">Nothing matches that.</p>
         ) : (
-          <ul className="commands-list" ref={list}>
+          <ul className="commands-list" ref={list} id="command-list" role="listbox">
             {shown.map((command, index) => (
-              <li key={command.id}>
+              <li key={command.id} role="presentation">
                 <button
+                  id={`command-${command.id}`}
+                  role="option"
+                  aria-selected={index === selected}
+                  tabIndex={-1}
                   className={index === selected ? 'command on' : 'command'}
                   onMouseEnter={() => setAt(index)}
                   onClick={() => run(command)}

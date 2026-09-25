@@ -7,6 +7,7 @@ import {
   formatNumber,
   isVector,
   displayUnit,
+  isUnitName,
   toNumberIn,
 } from './units'
 import { symbolToTex, toTex, valueToTex, sameTex } from './tex'
@@ -20,7 +21,7 @@ import {
   type SolveSetup,
 } from './solve'
 import { builtins } from './builtins'
-import { splitNote, splitQuery } from './source'
+import { normaliseForCalculation, splitNote, splitQuery, typographyHint } from './source'
 import { applyDirective, parseDirective, splitArrows } from './rounding'
 import { elementwisePowers, expandRanges } from './vectors'
 import {
@@ -196,8 +197,18 @@ function definedNames(source: string): Set<string> {
   return names
 }
 
-function explain(error: unknown, defined: Set<string>): string {
+function explain(error: unknown, defined: Set<string>, line?: string): string {
   const message = error instanceof Error ? error.message : String(error)
+  // A line copied out of a document, whose characters mean something else
+  // here. The parser's own complaint points at a character the person cannot
+  // see anything wrong with, so say what to write instead.
+  if (line && /unexpected|syntax error|value expected|parenthesis|end of expression/i.test(message)) {
+    const hint = typographyHint(line)
+    if (hint) return hint
+  }
+  if (/call stack|too much recursion/i.test(message)) {
+    return 'That line is too long or too deeply nested to work out in one go — break it into a few named steps. (A function that calls itself will do this too.)'
+  }
   if (/must be square|Matrix must be square|two dimensional/i.test(message)) {
     return `${message} — if one of these is a list, write the operation element by element: .* to multiply, ./ to divide.`
   }
@@ -358,15 +369,39 @@ function evaluateStatement(
       value = applyDirective(value, parseDirective(directive), context.scope)
     }
 
+    // Infinity and NaN are answers in the way that a blank stare is an answer.
+    // A sheet that prints one has already gone wrong several characters
+    // earlier, and printing it as a result invites the reader to believe it.
+    const impossible = nonFiniteMessage(value)
+    if (impossible) return { kind: 'error', source: line, message: impossible }
+
     // Redefinition is legal — a staged calculation sometimes revises a value —
     // but silently is dangerous: a reviewer reading top to bottom has no way to
     // see that everything above used the earlier number.
-    const warning =
+    const redefinition =
       previous === undefined
         ? undefined
         : typeof previous === 'function'
           ? `${name} is a built-in function — this replaces it for the lines below.`
           : `${name} was ${formatValue(previous, precision)} above — this redefines it for the lines below.`
+
+    // A name that is a unit and is also given a value further down reads as
+    // the unit here, silently: `a = b` above `b = 2 mm` is one barn, and
+    // nothing about the printed line says so.
+    const borrowed = collectSymbols(node)
+      .filter(
+        (symbol) =>
+          symbol !== name &&
+          defined.has(symbol) &&
+          context.scope[symbol] === undefined &&
+          isUnitName(symbol),
+      )
+      .map(
+        (symbol) =>
+          `${symbol} here is the unit, not the ${symbol} defined further down — move that line above this one, or rename it.`,
+      )
+
+    const warning = [redefinition, ...borrowed].filter(Boolean).join(' ') || undefined
 
     if (isAssignment) {
       // Evaluating an assignment node has already put the *unrounded* value in
@@ -437,7 +472,7 @@ function evaluateStatement(
       name: name ?? undefined,
     }
   } catch (error) {
-    return { kind: 'error', source: line, message: explain(error, defined) }
+    return { kind: 'error', source: line, message: explain(error, defined, line) }
   }
 }
 
@@ -509,7 +544,7 @@ function evaluateSolve(
     if (error instanceof SolveError) {
       return { kind: 'error', source: line, message: error.message }
     }
-    return { kind: 'error', source: line, message: explain(error, defined) }
+    return { kind: 'error', source: line, message: explain(error, defined, line) }
   }
 }
 
@@ -580,38 +615,63 @@ function evaluateTable(
   for (const raw of dataRows) {
     const cells = raw.split('|').map((cell) => cell.trim())
     const rowScope: Record<string, unknown> = { ...context.scope }
-    const row: Cell[] = []
+    // One slot per column, filled in column order rather than in two passes:
+    // a computed column written anywhere but last used to shift every value
+    // after it under the wrong heading.
+    const row: (Cell | null)[] = columns.map(() => null)
     let failed = false
 
+    // A row normally gives one value per plain column, in order. But a row
+    // written out under the header, with a gap where each computed column is,
+    // reads as though it should line up — and when it has exactly as many
+    // cells as there are columns, that is what it means.
+    const positional = cells.length === columns.length && inputs.length !== columns.length
+
     inputs.forEach((column, index) => {
+      const place = columns.indexOf(column)
       if (failed) {
-        row.push({ kind: 'text', text: '—' })
+        row[place] = { kind: 'text', text: '—' }
         return
       }
-      const cell = cells[index] ?? ''
+      const cell = (positional ? cells[place] : cells[index]) ?? ''
+      if (cell === '') {
+        // A row that stops early leaves the rest blank rather than failing:
+        // half a row of section properties is a row being typed.
+        row[place] = { kind: 'text', text: '—' }
+        return
+      }
       // A bare word that is not a defined value is a label, not an expression -
       // otherwise a section called "A" would be evaluated as one ampere.
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(cell) && rowScope[cell] === undefined) {
-        row.push({ kind: 'text', text: cell })
+        row[place] = { kind: 'text', text: cell }
         return
       }
       try {
-        const value = elementwisePowers(math.parse(expandRanges(cell))).evaluate(rowScope)
+        const parsed = elementwisePowers(math.parse(expandRanges(cell)))
+        const misuse = absoluteTemperatureMisuse(parsed, rowScope)
+        if (misuse) throw new Error(misuse)
+        const value = parsed.evaluate(rowScope)
         rowScope[column.name] = value
-        row.push({ kind: 'value', value })
+        row[place] = { kind: 'value', value }
       } catch (error) {
-        row.push({ kind: 'text', text: explain(error, defined) })
+        row[place] = { kind: 'text', text: explain(error, defined, cell) }
         failed = true
       }
     })
 
     for (const column of columns.filter((candidate) => !candidate.input)) {
+      const place = columns.indexOf(column)
       if (failed) {
-        row.push({ kind: 'text', text: '—' })
+        row[place] = { kind: 'text', text: '—' }
         continue
       }
       try {
         const parsed = elementwisePowers(math.parse(expandRanges(column.expression!)))
+        // A degC used as a quantity rather than a difference is wrong by 273,
+        // and a table is exactly where that goes unnoticed — one cell among
+        // thirty that looks as plausible as the rest.
+        const misuse = absoluteTemperatureMisuse(parsed, rowScope)
+        if (misuse) throw new Error(misuse)
         const value = parsed.evaluate(rowScope)
         rowScope[column.name] = value
         if (typeof value === 'boolean') {
@@ -627,16 +687,16 @@ function evaluateTable(
               rightNode.evaluate(rowScope),
             )
           }
-          row.push({ kind: 'verdict', pass: value, margin })
+          row[place] = { kind: 'verdict', pass: value, margin }
         } else {
-          row.push({ kind: 'value', value })
+          row[place] = { kind: 'value', value }
         }
       } catch (error) {
-        row.push({ kind: 'text', text: explain(error, defined) })
+        row[place] = { kind: 'text', text: explain(error, defined, column.expression ?? undefined) }
       }
     }
 
-    grid.push(row)
+    grid.push(row.map((cell) => cell ?? { kind: 'text', text: '' }))
   }
 
   // Second pass: format each column together.
@@ -851,7 +911,7 @@ function evaluateSolve2(
     if (error instanceof SolveError) {
       return { kind: 'error', source: line, message: error.message }
     }
-    return { kind: 'error', source: line, message: explain(error, defined) }
+    return { kind: 'error', source: line, message: explain(error, defined, line) }
   }
 }
 
@@ -1001,6 +1061,8 @@ function evaluatePlot(line: string, context: Context, defined: Set<string>): Lin
           /* a definition that cannot run under this override is skipped */
         }
       }
+      const misuse = index === 0 ? absoluteTemperatureMisuse(exprNode, scope) : null
+      if (misuse) throw new Error(misuse)
       const y = exprNode.evaluate(scope)
       if (yUnit === null) yUnit = displayUnit(y)
       const yValue = toNumberIn(y, yUnit)
@@ -1019,7 +1081,7 @@ function evaluatePlot(line: string, context: Context, defined: Set<string>): Lin
       summary: `${points.length} points`,
     }
   } catch (error) {
-    return { kind: 'error', source: line, message: explain(error, defined) }
+    return { kind: 'error', source: line, message: explain(error, defined, line) }
   }
 }
 
@@ -1059,6 +1121,23 @@ function evaluateImport(
  * line so that line numbers stay aligned with the editor.
  */
 /** `math {` on its own, or `math f(x) = {` — a system or a piecewise definition over several lines. */
+/**
+ * A line that is typeset as written rather than worked out: a heading, a note,
+ * a part of an exercise, an answer, a `math` or `show` line, the opener of a
+ * `math {` system or an `align` block.
+ */
+function presentational(line: string): boolean {
+  return (
+    line.startsWith('#') ||
+    line.startsWith('//') ||
+    /^[a-h]\)(\s|$)/.test(line) ||
+    (/^(svar|answer)\b\s*:?\s+\S/i.test(line) && !/^(svar|answer)\s*=/i.test(line)) ||
+    (/^(math|show)\s/.test(line) && !/^(math|show)\s*=/.test(line)) ||
+    MATH_BLOCK.test(line) ||
+    ALIGN_BLOCK.test(line)
+  )
+}
+
 const MATH_BLOCK = /^math\b.*\{\s*$/
 const ALIGN_BLOCK = /^align(?:\s+#[A-Za-z_][A-Za-z0-9_]*)?\s*$/
 
@@ -1126,7 +1205,12 @@ function runLines(
   startIndex = 0,
 ): void {
   for (let index = startIndex; index < lines.length; index += 1) {
-    const line = lines[index].trim()
+    const typed = lines[index].trim()
+    // Lines that are read rather than evaluated keep their typography: a
+    // heading, a note, and presentation maths are a person's own writing, and
+    // mathToTex does its own reading of ≤ and m². Everything else is
+    // arithmetic, where a pasted × can only mean one thing.
+    const line = presentational(typed) ? typed : normaliseForCalculation(typed)
     let result: Line
 
     if (line === '') {
@@ -1225,9 +1309,15 @@ function runLines(
       // saying the actual mistake was one missing word several lines up.
       let stray: number | null = null
       while (cursor < lines.length && splitNote(lines[cursor].trim()).body !== 'end') {
-        const row = splitNote(lines[cursor]).body
+        const row = normaliseForCalculation(splitNote(lines[cursor]).body)
         if (row !== '') {
-          const multiColumn = block.length > 0 && block[0].includes('|')
+          // A header with several columns to fill in expects a row with the
+          // same bars in it. A header whose other columns are computed does
+          // not: `b | A = b^2` is filled in one value per row, no bar in
+          // sight, and warning about that was warning about nothing.
+          const toFill =
+            block.length > 0 ? block[0].split('|').filter((part) => !part.includes('=')).length : 0
+          const multiColumn = toFill > 1
           if (stray === null && ((multiColumn && !row.includes('|')) || /^\s*table\b/.test(row))) {
             stray = cursor
           }
@@ -1262,6 +1352,35 @@ function runLines(
     results.push(result)
     snapshots?.push(cloneContext(context))
   }
+}
+
+/**
+ * What is wrong with a value that is not a number any more, or null.
+ *
+ * Both come from arithmetic that had no answer — a division by zero, a
+ * quantity too large for a double, 0/0 — and both used to print as though
+ * they were results.
+ */
+export function nonFiniteMessage(value: unknown): string | null {
+  const numbers: number[] = []
+  const collect = (candidate: unknown) => {
+    if (typeof candidate === 'number') numbers.push(candidate)
+    else if (candidate && typeof candidate === 'object') {
+      const unit = candidate as any
+      if (unit.isUnit && typeof unit.value === 'number') numbers.push(unit.value)
+      else if (Array.isArray(candidate)) candidate.forEach(collect)
+      else if (unit.isMatrix) unit.toArray().forEach(collect)
+    }
+  }
+  collect(value)
+
+  if (numbers.some(Number.isNaN)) {
+    return 'That comes out as "not a number" — an operation with no answer, such as 0/0 or infinity minus infinity. Check the line above it for a quantity that came out as zero.'
+  }
+  if (numbers.some((number) => !Number.isFinite(number))) {
+    return 'That comes out as infinity — something was divided by zero, or the number grew past what a computer can hold. Check the divisor on this line.'
+  }
+  return null
 }
 
 /**

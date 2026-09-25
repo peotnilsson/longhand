@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { evaluateSheet, type Line, type SheetOptions } from './engine'
+import { evaluateSheet, recomputeCold, type ColdRun, type Line, type SheetOptions } from './engine'
 import type { EvaluateRequest, EvaluateResponse } from './engine/worker'
 
 /**
@@ -18,6 +18,8 @@ import type { EvaluateRequest, EvaluateResponse } from './engine/worker'
 
 let worker: Worker | null = null
 let unavailable = false
+/** One counter for every request this page makes, so answers can be matched. */
+const sent = { current: 0 }
 
 function evaluator(): Worker | null {
   if (unavailable) return null
@@ -33,6 +35,29 @@ function evaluator(): Worker | null {
     unavailable = true
     return null
   }
+}
+
+/**
+ * Ask the worker to check its own cache, which is the only one that matters.
+ *
+ * Falls back to running it here when there is no worker — the same fallback
+ * the evaluation itself takes.
+ */
+export async function recheck(source: string, options: SheetOptions): Promise<ColdRun> {
+  const engine = evaluator()
+  if (!engine) return recomputeCold(source, options)
+
+  const id = (sent.current += 1)
+  return new Promise<ColdRun>((resolve) => {
+    const onMessage = (event: MessageEvent<EvaluateResponse>) => {
+      if (event.data.id !== id || !event.data.cold) return
+      engine.removeEventListener('message', onMessage)
+      resolve(event.data.cold)
+    }
+    engine.addEventListener('message', onMessage)
+    const request: EvaluateRequest = { id, source, options, cold: true }
+    engine.postMessage(request)
+  })
 }
 
 export interface Evaluation {
@@ -54,7 +79,6 @@ export function useEvaluation(source: string, options: SheetOptions): Evaluation
     settings,
     lines: evaluateSheet(source, options),
   }))
-  const sent = useRef(0)
   const shown = useRef(0)
 
   useEffect(() => {

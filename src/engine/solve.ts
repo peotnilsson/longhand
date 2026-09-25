@@ -1,8 +1,8 @@
-import { create, all, type MathNode } from 'mathjs'
+import type { MathNode } from 'mathjs'
+import { math } from './units'
 import { splitTolerance } from './uncertainty'
 import { splitNote } from './source'
 
-const math = create(all)
 
 /**
  * `b_req = solve sigma = f_ck for b`

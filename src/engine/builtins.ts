@@ -1,8 +1,7 @@
-import { create, all } from 'mathjs'
-import { range } from './vectors'
+import { math } from './units'
+import { POWER, power, range } from './vectors'
 import { library, LIBRARY_NAMES } from './library'
 
-const math = create(all)
 
 /**
  * The two things an engineer does with a table of data: read a value between
@@ -85,6 +84,9 @@ export function lookup(key: unknown, keys: unknown[], values: unknown[]): unknow
 
 /** Seeded into every sheet's scope, so they are available without an import. */
 export const builtins = (): Record<string, unknown> => ({
+  // `^` is evaluated through this so a list raises element by element and a
+  // matrix raises as a matrix. The parser inserts it; nobody writes it.
+  [POWER]: power,
   interp,
   lookup,
   range,
